@@ -1,0 +1,40 @@
+name = "mix-bot"
+main = "src/worker.js"
+compatibility_date = "2025-01-01"
+
+# Раз в неделю, понедельник 06:00–06:50 МСК: каждые 10 минут обновляется один бренд из BRANDS по порядку.
+[triggers]
+crons = ["*/10 3 * * 1"]
+
+# Бесплатные модели Cloudflare
+[ai]
+binding = "AI"
+
+# Хранилище: справочник табаков и диалоги.
+# Создать: Storage & Databases → KV → Create → имя mix-bot, вставить ID сюда.
+[[kv_namespaces]]
+binding = "KV"
+id = "ЗАМЕНИТЬ_НА_ID"
+
+[vars]
+# ── Мозги. Чтобы сменить модель, меняются только эти строки ──
+# cloudflare — бесплатно, ключ не нужен
+# anthropic  — Claude, нужен секрет LLM_API_KEY          (LLM_MODEL = "claude-sonnet-5-5")
+# openai     — OpenAI и совместимые, нужен LLM_API_KEY   (LLM_MODEL = "gpt-...", при необходимости LLM_BASE_URL)
+LLM_PROVIDER = "cloudflare"
+LLM_MODEL = "@cf/meta/llama-3.3-70b-instruct-fp8-fast"
+LLM_BASE_URL = ""
+
+# Бренды: как они называются в адресе на htreviews.org/tobaccos/<бренд>. Не больше 6 (по одному на 10 минут расписания).
+BRANDS = "darkside,musthave,bonche,deus,tangiers"
+
+# Картинка к главному миксу: on / off
+IMAGES = "on"
+IMAGE_MODEL = "@cf/black-forest-labs/flux-1-schnell"
+
+SHOP_URL = "https://vektorsigma.am"
+
+# Секреты (Settings → Variables and Secrets, тип Secret):
+#   BOT_TOKEN       — токен бота от @BotFather
+#   WEBHOOK_SECRET  — случайная строка (латиница и цифры)
+#   LLM_API_KEY     — только если LLM_PROVIDER не cloudflare
