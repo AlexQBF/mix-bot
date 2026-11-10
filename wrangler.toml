@@ -26,13 +26,18 @@ LLM_PROVIDER = "cloudflare"
 LLM_MODEL = "@cf/meta/llama-3.3-70b-instruct-fp8-fast"
 LLM_BASE_URL = ""
 
-# Бренды из каталога vektorsigma.am, как они называются в адресе htreviews.org/tobaccos/<бренд>.
-# Не больше 30 (по одному на запуск расписания).
-BRANDS = "al-fakher,bliss,black-burn,bonche,chaba,chabacco,darkside,deus,dogma,endorphin,jent,kraken,macbellzy,musthave,nash,original-virginia,overdose,ready,spectrum,sapphire-crown,sarma,satyr,starline,tangiers,trofimoffs,severnyy,khuligan"
+# Бренды, из которых бот собирает миксы (только наши). Через запятую, как в адресе htreviews.org/tobaccos/<бренд>.
+# Добавить бренд: дописать сюда → Commit → открыть /refresh?key=... Не больше 30.
+# deus — Deus, khuligan — Хулиган, spectrum — Spectrum, kraken — Kraken, satyr — Satyr,
+# original-virginia — Original Virginia, morpheus — Morpheus
+BRANDS = "deus,khuligan,spectrum,kraken,satyr,original-virginia,morpheus"
 
 # Картинка к главному миксу: on / off
 IMAGES = "on"
-IMAGE_MODEL = "@cf/black-forest-labs/flux-1-schnell"
+# FLUX.2 klein 4B — ~100 «нейронов» за картинку. Запасной вариант: "@cf/black-forest-labs/flux-1-schnell" (проще, без текста).
+IMAGE_MODEL = "@cf/black-forest-labs/flux-2-klein-4b"
+# Текст на картинке: full — SIGMA MIX + подписи с долями; logo — только SIGMA MIX; none — без текста.
+IMAGE_TEXT = "full"
 
 SHOP_URL = "https://vektorsigma.am"
 
