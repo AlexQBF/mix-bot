@@ -14,6 +14,17 @@
  *           BRANDS, IMAGES, IMAGE_MODEL, SHOP_URL
  */
 
+// Тексты профиля бота. После правки открыть /setup?key=... — Telegram обновит их.
+// Описание — на пустом экране до «Старт» (до 512 символов).
+const BOT_DESCRIPTION =
+  'Привет! Я Sigma Mix, твой карманный кальянщик 💨\n' +
+  'Напиши что нравится: «хочу ягодное с кислинкой», «люблю Supernova», «чтобы освежало, но не мята».\n' +
+  'Подберу 3 микса с пропорциями и описанием.\n' +
+  'Понравилось - бери табачок у нас в VektorSIGMA 🛒\n\n' +
+  '🔞 Строго 18+';
+// Короткое «О боте» — в профиле и при пересылке ссылки (до 120 символов).
+const BOT_ABOUT = 'Подбираю кальянные миксы под твой вкус из табаков VektorSIGMA 💨 18+';
+
 const SOURCE = 'https://htreviews.org';
 const PAGE = 20; // сайт сам грузит по 20, большие порции отдают неполный список
 const STRENGTH = { 'лёгкая': 1, 'легкая': 1, 'средне-лёгкая': 2, 'средне-легкая': 2, 'средняя': 3, 'средне-крепкая': 4, 'крепкая': 5 };
@@ -474,7 +485,9 @@ async function onSetup(url, env) {
     url: url.origin + '/webhook', secret_token: env.WEBHOOK_SECRET, allowed_updates: ['message', 'callback_query'],
   });
   await tg(env, 'setMyCommands', { commands: [{ command: 'start', description: 'Подобрать микс' }, { command: 'new', description: 'Новый запрос' }] });
-  return Response.json(r);
+  const d = await tg(env, 'setMyDescription', { description: BOT_DESCRIPTION });
+  const a = await tg(env, 'setMyShortDescription', { short_description: BOT_ABOUT });
+  return Response.json({ webhook: r, description: d, about: a });
 }
 
 /** /refresh?key=… — страница, которая по очереди обновляет все бренды. /refresh?key=…&brand=slug — один бренд. */
