@@ -36,8 +36,8 @@ BRANDS = "deus,khuligan,spectrum,kraken,satyr,original-virginia,morpheus"
 IMAGES = "on"
 # FLUX.2 klein 4B — ~100 «нейронов» за картинку. Запасной вариант: "@cf/black-forest-labs/flux-1-schnell" (проще, без текста).
 IMAGE_MODEL = "@cf/black-forest-labs/flux-2-klein-4b"
-# Текст на картинке: full — SIGMA MIX + подписи с долями; logo — только SIGMA MIX; none — без текста.
-IMAGE_TEXT = "full"
+# Текст на картинке: logo — только SIGMA MIX (состав и доли — в тексте под картинкой); full — ещё подписи с долями (бесплатная модель путает буквы); none — без текста.
+IMAGE_TEXT = "logo"
 
 SHOP_URL = "https://vektorsigma.am"
 
