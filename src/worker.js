@@ -42,12 +42,13 @@ const T = {
     failed: 'Не получилось собрать миксы. Нажми «Ещё варианты» или перефразируй запрос.',
     more: '🔄 Ещё варианты',
     newReq: '✏️ Новый запрос',
-    heads: ['🎯 В яблочко', '🥈 Запасной', '🥉 Ещё вариант'],
-    strengthLabel: '💪 Крепость: ',
+    mixOf: (i, n) => `Микс ${i} из ${n}`,
+    best: 'лучшее попадание',
+    strengthLabel: 'Крепость: ',
     footer: '🛒 Покажи этот список в магазине — соберём.',
     mixWord: 'Микс',
     llmLang: 'русском',
-    llmStrength: 'лёгкий, средний или крепкий',
+    llmStrength: 'лёгкая, средняя или крепкая',
   },
   hy: {
     hello:
@@ -72,8 +73,9 @@ const T = {
     failed: 'Չստացվեց միքսեր կազմել։ Սեղմիր «Այլ տարբերակներ» կամ վերաձևակերպիր հարցումը։',
     more: '🔄 Այլ տարբերակներ',
     newReq: '✏️ Նոր հարցում',
-    heads: ['🎯 Ուղիղ նշանակետին', '🥈 Պահեստային', '🥉 Եվս մեկ տարբերակ'],
-    strengthLabel: '💪 Թնդություն՝ ',
+    mixOf: (i, n) => `Միքս ${i}՝ ${n}-ից`,
+    best: 'լավագույն համընկնում',
+    strengthLabel: 'Թնդություն՝ ',
     footer: '🛒 Ցույց տուր այս ցուցակը խանութում, և մենք կհավաքենք։',
     mixWord: 'Միքս',
     llmLang: 'армянском (восточноармянский литературный, армянским алфавитом)',
@@ -284,19 +286,20 @@ async function makeMixes(env, chat, session, more = false, lang = 'ru') {
   session.titles = [...(session.titles || []), ...result.map((m) => m.title)].slice(-15);
   await putSession(env, chat, session);
 
-  const blocks = result.map((m, i) => renderMix(m, i, lang));
+  // Каждый микс — отдельным сообщением. Первый — с картинкой, у последнего — подвал и кнопки.
+  const blocks = result.map((m, i) => renderMix(m, i, lang, result.length));
   const footer = '\n\n' + t.footer + (env.SHOP_URL ? ' ' + env.SHOP_URL : '');
+  blocks[blocks.length - 1] += footer;
 
   let photo = null;
   if ((env.IMAGES || 'on') === 'on' && result.imagePrompt) {
     await action(env, chat, 'upload_photo');
     photo = await makeImage(env, result.imagePrompt).catch((e) => (console.log('image', e.message), null));
   }
-  if (photo && blocks[0].length <= 1000) {
-    await sendPhoto(env, chat, photo, blocks[0]);
-    await send(env, chat, blocks.slice(1).join('\n\n') + footer, resultKeyboard(lang));
-  } else {
-    await send(env, chat, blocks.join('\n\n') + footer, resultKeyboard(lang));
+  for (let i = 0; i < blocks.length; i++) {
+    const kb = i === blocks.length - 1 ? resultKeyboard(lang) : undefined;
+    if (i === 0 && photo && blocks[0].length <= 1000) await sendPhoto(env, chat, photo, blocks[0], kb);
+    else await send(env, chat, blocks[i], kb);
   }
 }
 
@@ -388,7 +391,9 @@ async function composeMixes(env, session, candidates, lang = 'ru') {
     '- Первый микс — максимально точное попадание в запрос. Второй и третий — альтернативы с другим характером.\n' +
     '- В миксе 2–4 табака, доли кратны 5, в сумме ровно 100. Один табак — не больше чем в двух миксах.\n' +
     '- Учитывай желаемую крепость и не бери вкусы, которых клиент просил избегать.\n' +
-    '- title — короткое цепляющее название микса. text — 2–3 вкусных предложения на «ты»: что чувствуется на вдохе и выдохе, почему это подойдёт. Без обещаний про здоровье.\n' +
+    '- title — короткое цепляющее название микса, 2–4 слова.\n' +
+    '- text — ОДНО сочное предложение на «ты», до 20 слов: что чувствуется на вдохе и что на выдохе. ' +
+    'Конкретные вкусы, без воды вроде «гармоничный опыт», «идеально сочетает», «погрузись в мир». Без обещаний про здоровье.\n' +
     '- strength — итоговая крепость микса одним словом: ' + t.llmStrength + '.\n' +
     '- title, text и strength пиши на ' + t.llmLang + ' языке. Названия брендов и табаков в текст не переводи.\n' +
     '- image — описание картинки для первого микса НА АНГЛИЙСКОМ: натюрморт из ингредиентов вкуса на тёмном фоне, без текста, людей и курительных принадлежностей.\n' +
@@ -430,15 +435,31 @@ export function validateMixes(out, candidates) {
   return res;
 }
 
-export function renderMix(m, i, lang = 'ru') {
+/**
+ * Карточка микса:
+ *   Микс 1 из 3 · лучшее попадание
+ *   ПЕЧЕНЬЕ С АРБУЗОМ И МЯТОЙ
+ *   ┃ Kraken Strong Ligero · Cookie — 50%      ← цитата Telegram (серая плашка)
+ *   Описание одной фразой.
+ *   Крепость: средняя
+ */
+export function renderMix(m, i, lang = 'ru', total = 3) {
   const t = T[lang];
-  const head = '<b>' + t.heads[i] + ' — «' + esc(m.title) + '»</b>';
+  const label = t.mixOf(i + 1, total) + (i === 0 ? ' · ' + t.best : '');
   const parts = m.parts.map((p) => {
     const it = p.item;
     const line = it.l && it.l !== 'Основная' ? ' ' + it.l : '';
-    return `▫️ ${p.p}% · ${esc(it.b + line)} — <b>${esc(it.n)}</b>${it.a ? ' (' + esc(it.a) + ')' : ''}`;
+    // Русское название показываем, только если оно добавляет смысл (2+ слова), а не просто перевод.
+    const alt = it.a && /[а-яё]/i.test(it.a) && !/[а-яё]/i.test(it.n) && it.a.trim().split(/\s+/).length > 1 ? ' (' + esc(it.a) + ')' : '';
+    return `${esc(it.b + line)} · <b>${esc(it.n)}</b>${alt} — ${p.p}%`;
   });
-  return head + '\n' + parts.join('\n') + (m.text ? '\n<i>' + esc(m.text) + '</i>' : '') + (m.strength ? '\n' + t.strengthLabel + esc(m.strength) : '');
+  return (
+    `<i>${esc(label)}</i>\n` +
+    `<b>${esc(m.title.toLocaleUpperCase(lang === 'hy' ? 'hy' : 'ru'))}</b>\n\n` +
+    `<blockquote>${parts.join('\n')}</blockquote>\n` +
+    (m.text ? esc(m.text) + '\n' : '') +
+    (m.strength ? '\n' + t.strengthLabel + esc(m.strength) : '')
+  ).trim();
 }
 
 /* ───────────────────────── Мозги (сменные) ───────────────────────── */
@@ -662,13 +683,14 @@ const send = (env, chat, text, reply_markup) =>
   tg(env, 'sendMessage', { chat_id: chat, text, parse_mode: 'HTML', disable_web_page_preview: true, ...(reply_markup ? { reply_markup } : {}) });
 const action = (env, chat, a) => tg(env, 'sendChatAction', { chat_id: chat, action: a });
 
-async function sendPhoto(env, chat, bytes, caption) {
+async function sendPhoto(env, chat, bytes, caption, reply_markup) {
   const form = new FormData();
   form.append('chat_id', String(chat));
   form.append('caption', caption);
   form.append('parse_mode', 'HTML');
+  if (reply_markup) form.append('reply_markup', JSON.stringify(reply_markup));
   form.append('photo', new Blob([bytes], { type: 'image/jpeg' }), 'mix.jpg');
   const r = await fetch(`https://api.telegram.org/bot${env.BOT_TOKEN}/sendPhoto`, { method: 'POST', body: form });
   const j = await r.json().catch(() => ({}));
-  if (!j.ok) { console.log('tg sendPhoto', JSON.stringify(j).slice(0, 300)); await send(env, chat, caption); }
+  if (!j.ok) { console.log('tg sendPhoto', JSON.stringify(j).slice(0, 300)); await send(env, chat, caption, reply_markup); }
 }
