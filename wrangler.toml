@@ -14,7 +14,7 @@ binding = "AI"
 # Создать: Storage & Databases → KV → Create → имя mix-bot, вставить ID сюда.
 [[kv_namespaces]]
 binding = "KV"
-id = "ЗАМЕНИТЬ_НА_ID"
+id = "feb60298be7e4467a50ee0c889bafdc6"
 
 [vars]
 # ── Мозги. Чтобы сменить модель, меняются только эти строки ──
