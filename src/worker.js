@@ -14,21 +14,86 @@
  *           BRANDS, IMAGES, IMAGE_MODEL, SHOP_URL
  */
 
-// Приветствие после /start. Меняется сразу после деплоя, ничего открывать не нужно.
-// <b>жирный</b>, <i>курсив</i>, \n — перенос строки.
-const HELLO =
-  'Привет! Я <b>Sigma Mix</b>, твой карманный кальянщик 💨\n\n' +
-  'Напиши что нравится: <i>«хочу ягодное с кислинкой»</i>, <i>«люблю Supernova»</i>, <i>«чтобы освежало, но не мята»</i>.\n\n' +
-  'Подберу 3 микса с пропорциями и описанием.\n' +
-  'Понравилось - бери табачок у нас в VektorSIGMA 🛒\n\n' +
-  '<i>Строго 18+</i>';
+/* ───────────────────────── Тексты ─────────────────────────
+ * Все фразы бота на двух языках: ru — русский, hy — армянский.
+ * Меняются сразу после деплоя. <b>жирный</b>, <i>курсив</i>, \n — перенос строки.
+ */
+const T = {
+  ru: {
+    hello:
+      'Привет! Я <b>Sigma Mix</b>, твой карманный кальянщик 💨\n\n' +
+      'Напиши что нравится: <i>«хочу ягодное с кислинкой»</i>, <i>«люблю Supernova»</i>, <i>«чтобы освежало, но не мята»</i>.\n\n' +
+      'Подберу 3 микса с пропорциями и описанием.\n' +
+      'Понравилось - бери табачок у нас в VektorSIGMA 🛒\n\n' +
+      '<i>Строго 18+</i>',
+    langSet: 'Отлично, общаемся по-русски 🇷🇺\nНапиши, что тебе нравится, — подберу миксы.',
+    askStrength: 'Понял по вкусам. А как крепко куришь?',
+    strength: ['🌿 Лёгко', '⚖️ Средне', '🔥 Крепко', 'Без разницы'],
+    notRelevant: 'Я подбираю кальянные миксы. Напиши, какие вкусы и табаки тебе нравятся и как крепко куришь.',
+    notText: 'Напиши текстом, что любишь курить, — подберу миксы.',
+    error: 'Что-то пошло не так. Попробуй ещё раз через минуту.',
+    restart: 'Давай заново. Напиши, чего хочется сейчас.',
+    expired: 'Запрос уже устарел. Напиши заново, что хочется покурить.',
+    tellFirst: 'Сначала расскажи, что любишь.',
+    noCatalog: 'Справочник табаков ещё не загружен. Загляни чуть позже.',
+    picking: '🔎 Подбираю миксы…',
+    pickingMore: '🔄 Думаю над другими вариантами…',
+    tooFew: 'Под такой запрос у нас почти ничего нет. Попробуй описать пошире или убрать ограничения.',
+    failed: 'Не получилось собрать миксы. Нажми «Ещё варианты» или перефразируй запрос.',
+    more: '🔄 Ещё варианты',
+    newReq: '✏️ Новый запрос',
+    heads: ['🎯 В яблочко', '🥈 Запасной', '🥉 Ещё вариант'],
+    strengthLabel: '💪 Крепость: ',
+    footer: '🛒 Покажи этот список в магазине — соберём.',
+    mixWord: 'Микс',
+    llmLang: 'русском',
+    llmStrength: 'лёгкий, средний или крепкий',
+  },
+  hy: {
+    hello:
+      'Բարև՛։ Ես <b>Sigma Mix</b>-ն եմ՝ քո գրպանի կալյանի վարպետը 💨\n\n' +
+      'Գրիր, թե ինչ է քեզ դուր գալիս՝ <i>«ուզում եմ հատապտղային՝ թթվաշությամբ»</i>, <i>«սիրում եմ Supernova»</i>, <i>«որ թարմացնի, բայց ոչ անանուխ»</i>։\n\n' +
+      'Կընտրեմ 3 միքս՝ համամասնություններով և նկարագրությամբ։\n' +
+      'Հավանեցի՞ր՝ ծխախոտը գնիր մեզ մոտ՝ VektorSIGMA-ում 🛒\n\n' +
+      '<i>Խիստ 18+</i>',
+    langSet: 'Հիանալի՛, խոսում ենք հայերեն 🇦🇲\nԳրիր, թե ինչ է քեզ դուր գալիս, և ես միքսեր կընտրեմ։',
+    askStrength: 'Հասկացա համերը։ Իսկ որքա՞ն թունդ ես ծխում։',
+    strength: ['🌿 Թեթև', '⚖️ Միջին', '🔥 Թունդ', 'Միևնույն է'],
+    notRelevant: 'Ես կալյանի միքսեր եմ ընտրում։ Գրիր, թե որ համերն ու ծխախոտներն են քեզ դուր գալիս և որքան թունդ ես ծխում։',
+    notText: 'Տեքստով գրիր, թե ինչ ես սիրում ծխել, և ես միքսեր կընտրեմ։',
+    error: 'Ինչ-որ բան սխալ գնաց։ Փորձիր նորից մեկ րոպեից։',
+    restart: 'Եկ նորից սկսենք։ Գրիր, թե հիմա ինչ ես ուզում։',
+    expired: 'Հարցումն արդեն հնացել է։ Նորից գրիր, թե ինչ ես ուզում ծխել։',
+    tellFirst: 'Նախ պատմիր, թե ինչ ես սիրում։',
+    noCatalog: 'Ծխախոտների տեղեկատուն դեռ բեռնված չէ։ Մի փոքր ուշ նայիր։',
+    picking: '🔎 Միքսեր եմ ընտրում…',
+    pickingMore: '🔄 Մտածում եմ այլ տարբերակների մասին…',
+    tooFew: 'Այս հարցման համար մեզ մոտ գրեթե ոչինչ չկա։ Փորձիր ավելի լայն նկարագրել կամ հանել սահմանափակումները։',
+    failed: 'Չստացվեց միքսեր կազմել։ Սեղմիր «Այլ տարբերակներ» կամ վերաձևակերպիր հարցումը։',
+    more: '🔄 Այլ տարբերակներ',
+    newReq: '✏️ Նոր հարցում',
+    heads: ['🎯 Ուղիղ նշանակետին', '🥈 Պահեստային', '🥉 Եվս մեկ տարբերակ'],
+    strengthLabel: '💪 Թնդություն՝ ',
+    footer: '🛒 Ցույց տուր այս ցուցակը խանութում, և մենք կհավաքենք։',
+    mixWord: 'Միքս',
+    llmLang: 'армянском (восточноармянский литературный, армянским алфавитом)',
+    llmStrength: 'թեթև, միջին կամ թունդ',
+  },
+};
+const LANG_SEPARATOR = '\n\n————————————\n\n';
+const LANG_PROMPT = '\n\nВыбери язык 👇 Ընտրիր լեզուն 👇';
 
 // Тексты профиля бота. После правки открыть /setup?key=... — Telegram обновит их.
-// Описание — на пустом экране до «Старт» (до 512 символов).
-const BOT_DESCRIPTION =
-  'Не знаешь, что покурить?\nПодберу микс под твой вкус 💨';
+// Описание — на пустом экране до «Старт» (до 512 символов). hy увидят те, у кого Telegram на армянском.
+const BOT_DESCRIPTION = {
+  ru: 'Не знаешь, что покурить?\nПодберу микс под твой вкус 💨',
+  hy: 'Չգիտե՞ս՝ ինչ ծխել։\nԿընտրեմ միքս քո ճաշակով 💨',
+};
 // Короткое «О боте» — в профиле и при пересылке ссылки (до 120 символов).
-const BOT_ABOUT = 'Подбираю кальянные миксы под твой вкус из табаков VektorSIGMA 💨 18+';
+const BOT_ABOUT = {
+  ru: 'Подбираю кальянные миксы под твой вкус из табаков VektorSIGMA 💨 18+',
+  hy: 'Ընտրում եմ կալյանի միքսեր քո ճաշակով՝ VektorSIGMA-ի ծխախոտներից 💨 18+',
+};
 
 const SOURCE = 'https://htreviews.org';
 const PAGE = 20; // сайт сам грузит по 20, большие порции отдают неполный список
@@ -50,11 +115,12 @@ export default {
     }
   },
 
-  // Понедельник 03:00–03:50 UTC, каждые 10 минут — по одному бренду за запуск
+  // Понедельник 03:00–07:50 UTC, каждые 10 минут — по одному бренду за запуск
   // (на бесплатном плане лимит 50 внешних запросов на запуск).
   async scheduled(event, env, ctx) {
     const brands = brandList(env);
-    const i = Math.floor(new Date(event.scheduledTime).getUTCMinutes() / 10);
+    const t = new Date(event.scheduledTime);
+    const i = (t.getUTCHours() - 3) * 6 + Math.floor(t.getUTCMinutes() / 10);
     if (brands[i]) ctx.waitUntil(crawlBrand(env, brands[i]).catch((e) => console.log('crawl', brands[i], e.message)));
   },
 };
@@ -73,24 +139,65 @@ async function onWebhook(request, env) {
   try {
     if (update.callback_query) await onCallback(env, update.callback_query);
     else if (update.message && update.message.text) await onText(env, update.message);
-    else if (update.message) await send(env, update.message.chat.id, 'Напиши текстом, что любишь курить, — подберу миксы.');
+    else if (update.message) await send(env, update.message.chat.id, T[await getLang(env, update.message.chat.id)].notText);
   } catch (e) {
     console.log('handler', e && e.stack || e);
     const chat = (update.message || (update.callback_query && update.callback_query.message) || {}).chat;
-    if (chat) await send(env, chat.id, 'Что-то пошло не так. Попробуй ещё раз через минуту.');
+    if (chat) await send(env, chat.id, T[await getLang(env, chat.id)].error);
   }
   return new Response('ok');
 }
 
+/* ───────────────────────── Язык ───────────────────────── */
+
+/** Язык сообщения по алфавиту: армянские буквы → hy, кириллица → ru, иначе не понять (латиница, эмодзи). */
+export function detectLang(text) {
+  const hy = (String(text).match(/[Ա-֏]/g) || []).length;
+  const ru = (String(text).match(/[а-яё]/gi) || []).length;
+  if (hy >= 2 && hy > ru) return 'hy';
+  if (ru >= 2 && ru >= hy) return 'ru';
+  return null;
+}
+async function getLang(env, chat) {
+  const l = await env.KV.get('lang:' + chat);
+  return l === 'hy' ? 'hy' : 'ru';
+}
+async function setLang(env, chat, lang) {
+  await env.KV.put('lang:' + chat, lang); // без срока: язык помним всегда
+}
+function langKeyboard() {
+  return { inline_keyboard: [[
+    { text: '🇷🇺 Русский', callback_data: 'lang:ru' },
+    { text: '🇦🇲 Հայերեն', callback_data: 'lang:hy' },
+  ]] };
+}
+
+/* ───────────────────────── Диалог ───────────────────────── */
+
 async function onText(env, msg) {
   const chat = msg.chat.id;
   const text = msg.text.trim();
-  if (text === '/start' || text === '/help' || text === '/new') {
+  const cmd = text.split(/[\s@]/)[0].toLowerCase();
+
+  if (cmd === '/start' || cmd === '/help') {
     await env.KV.delete('s:' + chat);
-    return send(env, chat, HELLO);
+    return send(env, chat, T.ru.hello + LANG_SEPARATOR + T.hy.hello + LANG_PROMPT, langKeyboard());
+  }
+  if (cmd === '/language' || cmd === '/lang') {
+    return send(env, chat, 'Выбери язык 👇\nԸնտրիր լեզուն 👇', langKeyboard());
+  }
+  if (cmd === '/new') {
+    await env.KV.delete('s:' + chat);
+    return send(env, chat, T[await getLang(env, chat)].restart);
   }
 
-  let session = await getSession(env, chat);
+  // Пишет на другом языке — переключаемся на него.
+  let lang = await getLang(env, chat);
+  const detected = detectLang(text);
+  if (detected && detected !== lang) { lang = detected; await setLang(env, chat, lang); }
+  const t = T[lang];
+
+  const session = await getSession(env, chat);
   let request = text;
   let force = false;
   if (session && session.stage === 'ask_strength') {
@@ -99,79 +206,86 @@ async function onText(env, msg) {
   }
   await action(env, chat, 'typing');
   const prefs = await extractPrefs(env, request);
-  if (!prefs.relevant) {
-    return send(env, chat, 'Я подбираю кальянные миксы. Напиши, какие вкусы и табаки тебе нравятся и как крепко куришь.');
-  }
+  if (!prefs.relevant) return send(env, chat, t.notRelevant);
   if (prefs.strength === 'unknown' && !force) {
     await putSession(env, chat, { stage: 'ask_strength', text: request, prefs });
-    return send(env, chat, 'Понял по вкусам. А как крепко куришь?', strengthKeyboard());
+    return send(env, chat, t.askStrength, strengthKeyboard(lang));
   }
   if (prefs.strength === 'unknown') prefs.strength = 'any';
-  await makeMixes(env, chat, { text: request, prefs, used: [], titles: [] });
+  await makeMixes(env, chat, { text: request, prefs, used: [], titles: [] }, false, lang);
 }
 
 async function onCallback(env, cq) {
   const chat = cq.message.chat.id;
   const data = cq.data || '';
   await tg(env, 'answerCallbackQuery', { callback_query_id: cq.id });
+
+  if (data.startsWith('lang:')) {
+    const lang = data.slice(5) === 'hy' ? 'hy' : 'ru';
+    await setLang(env, chat, lang);
+    return send(env, chat, T[lang].langSet);
+  }
+
+  const lang = await getLang(env, chat);
+  const t = T[lang];
   const session = await getSession(env, chat);
 
   if (data === 'new') {
     await env.KV.delete('s:' + chat);
-    return send(env, chat, 'Давай заново. Напиши, чего хочется сейчас.');
+    return send(env, chat, t.restart);
   }
-  if (!session) return send(env, chat, 'Запрос уже устарел. Напиши заново, что хочется покурить.');
+  if (!session) return send(env, chat, t.expired);
 
   if (data.startsWith('str:')) {
     session.prefs.strength = data.slice(4);
-    return makeMixes(env, chat, { text: session.text, prefs: session.prefs, used: [], titles: [] });
+    return makeMixes(env, chat, { text: session.text, prefs: session.prefs, used: [], titles: [] }, false, lang);
   }
   if (data === 'more') {
-    if (!session.prefs || session.stage === 'ask_strength') return send(env, chat, 'Сначала расскажи, что любишь.');
-    return makeMixes(env, chat, session, true);
+    if (!session.prefs || session.stage === 'ask_strength') return send(env, chat, t.tellFirst);
+    return makeMixes(env, chat, session, true, lang);
   }
 }
 
-function strengthKeyboard() {
+function strengthKeyboard(lang) {
+  const s = T[lang].strength;
   return { inline_keyboard: [[
-    { text: '🌿 Лёгко', callback_data: 'str:light' },
-    { text: '⚖️ Средне', callback_data: 'str:medium' },
-    { text: '🔥 Крепко', callback_data: 'str:strong' },
-  ], [{ text: 'Без разницы', callback_data: 'str:any' }]] };
+    { text: s[0], callback_data: 'str:light' },
+    { text: s[1], callback_data: 'str:medium' },
+    { text: s[2], callback_data: 'str:strong' },
+  ], [{ text: s[3], callback_data: 'str:any' }]] };
 }
 
-function resultKeyboard() {
+function resultKeyboard(lang) {
   return { inline_keyboard: [[
-    { text: '🔄 Ещё варианты', callback_data: 'more' },
-    { text: '✏️ Новый запрос', callback_data: 'new' },
+    { text: T[lang].more, callback_data: 'more' },
+    { text: T[lang].newReq, callback_data: 'new' },
   ]] };
 }
 
 /* ───────────────────────── Подбор миксов ───────────────────────── */
 
-async function makeMixes(env, chat, session, more = false) {
+async function makeMixes(env, chat, session, more = false, lang = 'ru') {
+  const t = T[lang];
   const catalog = await loadCatalog(env);
-  if (!catalog.length) return send(env, chat, 'Справочник табаков ещё не загружен. Загляни чуть позже.');
+  if (!catalog.length) return send(env, chat, t.noCatalog);
 
-  await send(env, chat, more ? '🔄 Думаю над другими вариантами…' : '🔎 Подбираю миксы…');
+  await send(env, chat, more ? t.pickingMore : t.picking);
   await action(env, chat, 'typing');
 
   const candidates = pickCandidates(catalog, session.prefs, session.used || [], more);
-  if (candidates.length < 4) {
-    return send(env, chat, 'Под такой запрос у нас почти ничего нет. Попробуй описать пошире или убрать ограничения.', resultKeyboard());
-  }
+  if (candidates.length < 4) return send(env, chat, t.tooFew, resultKeyboard(lang));
 
-  let result = await composeMixes(env, session, candidates);
-  if (!result.length) result = await composeMixes(env, session, candidates); // одна повторная попытка
-  if (!result.length) return send(env, chat, 'Не получилось собрать миксы. Нажми «Ещё варианты» или перефразируй запрос.', resultKeyboard());
+  let result = await composeMixes(env, session, candidates, lang);
+  if (!result.length) result = await composeMixes(env, session, candidates, lang); // одна повторная попытка
+  if (!result.length) return send(env, chat, t.failed, resultKeyboard(lang));
 
   session.stage = 'done';
   session.used = [...(session.used || []), ...result.flatMap((m) => m.parts.map((p) => p.item.k))].slice(-80);
   session.titles = [...(session.titles || []), ...result.map((m) => m.title)].slice(-15);
   await putSession(env, chat, session);
 
-  const blocks = result.map((m, i) => renderMix(m, i));
-  const footer = '\n\n🛒 Покажи этот список в магазине — соберём.' + (env.SHOP_URL ? ' ' + env.SHOP_URL : '');
+  const blocks = result.map((m, i) => renderMix(m, i, lang));
+  const footer = '\n\n' + t.footer + (env.SHOP_URL ? ' ' + env.SHOP_URL : '');
 
   let photo = null;
   if ((env.IMAGES || 'on') === 'on' && result.imagePrompt) {
@@ -180,9 +294,9 @@ async function makeMixes(env, chat, session, more = false) {
   }
   if (photo && blocks[0].length <= 1000) {
     await sendPhoto(env, chat, photo, blocks[0]);
-    await send(env, chat, blocks.slice(1).join('\n\n') + footer, resultKeyboard());
+    await send(env, chat, blocks.slice(1).join('\n\n') + footer, resultKeyboard(lang));
   } else {
-    await send(env, chat, blocks.join('\n\n') + footer, resultKeyboard());
+    await send(env, chat, blocks.join('\n\n') + footer, resultKeyboard(lang));
   }
 }
 
@@ -194,6 +308,7 @@ async function extractPrefs(env, text) {
   const system =
     'Ты разбираешь запрос клиента кальянного магазина. Верни ТОЛЬКО JSON без пояснений:\n' +
     '{"relevant":true,"like":[],"avoid":[],"groups":[],"flavors":[],"brands":[],"strength":"light|medium|strong|any|unknown"}\n' +
+    'Клиент может писать по-русски или по-армянски. Поля like и avoid ВСЕГДА заполняй по-русски, переводя с армянского.\n' +
     '- relevant: false, если сообщение вообще не про кальян, табак или вкусы.\n' +
     '- like: вкусы, которые человек хочет, по одному слову в именительном падеже ("Малина", "Лайм", "Мята").\n' +
     '  Если назвал только настроение ("свежее", "десертное") — подбери 3–6 подходящих вкусов сам.\n' +
@@ -260,7 +375,8 @@ export function pickCandidates(catalog, prefs, used = [], more = false) {
 }
 
 /** Шаг 3. ИИ собирает три микса из кандидатов. */
-async function composeMixes(env, session, candidates) {
+async function composeMixes(env, session, candidates, lang = 'ru') {
+  const t = T[lang];
   const lines = candidates.map((it, i) =>
     `${i + 1}|${it.b}${it.l && it.l !== 'Основная' ? ' ' + it.l : ''} — ${it.n}${it.a ? ' (' + it.a + ')' : ''}|` +
     `${STRENGTH_NAME[it.s] || '?'}|${it.c >= 3 ? it.r : '-'}|${it.t.join(', ')}`);
@@ -272,8 +388,9 @@ async function composeMixes(env, session, candidates) {
     '- Первый микс — максимально точное попадание в запрос. Второй и третий — альтернативы с другим характером.\n' +
     '- В миксе 2–4 табака, доли кратны 5, в сумме ровно 100. Один табак — не больше чем в двух миксах.\n' +
     '- Учитывай желаемую крепость и не бери вкусы, которых клиент просил избегать.\n' +
-    '- title — короткое цепляющее название микса по-русски. text — 2–3 вкусных предложения на «ты»: что чувствуется на вдохе и выдохе, почему это подойдёт. Без обещаний про здоровье.\n' +
-    '- strength — итоговая крепость микса одним словом: лёгкий, средний или крепкий.\n' +
+    '- title — короткое цепляющее название микса. text — 2–3 вкусных предложения на «ты»: что чувствуется на вдохе и выдохе, почему это подойдёт. Без обещаний про здоровье.\n' +
+    '- strength — итоговая крепость микса одним словом: ' + t.llmStrength + '.\n' +
+    '- title, text и strength пиши на ' + t.llmLang + ' языке. Названия брендов и табаков в текст не переводи.\n' +
     '- image — описание картинки для первого микса НА АНГЛИЙСКОМ: натюрморт из ингредиентов вкуса на тёмном фоне, без текста, людей и курительных принадлежностей.\n' +
     'Верни ТОЛЬКО JSON: {"mixes":[{"title":"","parts":[{"n":1,"p":50}],"text":"","strength":""}],"image":""}';
   const user =
@@ -313,14 +430,15 @@ export function validateMixes(out, candidates) {
   return res;
 }
 
-export function renderMix(m, i) {
-  const head = ['🎯 <b>В яблочко — «' + esc(m.title) + '»</b>', '🥈 <b>Запасной — «' + esc(m.title) + '»</b>', '🥉 <b>Ещё вариант — «' + esc(m.title) + '»</b>'][i];
+export function renderMix(m, i, lang = 'ru') {
+  const t = T[lang];
+  const head = '<b>' + t.heads[i] + ' — «' + esc(m.title) + '»</b>';
   const parts = m.parts.map((p) => {
     const it = p.item;
     const line = it.l && it.l !== 'Основная' ? ' ' + it.l : '';
     return `▫️ ${p.p}% · ${esc(it.b + line)} — <b>${esc(it.n)}</b>${it.a ? ' (' + esc(it.a) + ')' : ''}`;
   });
-  return head + '\n' + parts.join('\n') + (m.text ? '\n<i>' + esc(m.text) + '</i>' : '') + (m.strength ? '\n💪 Крепость: ' + esc(m.strength) : '');
+  return head + '\n' + parts.join('\n') + (m.text ? '\n<i>' + esc(m.text) + '</i>' : '') + (m.strength ? '\n' + t.strengthLabel + esc(m.strength) : '');
 }
 
 /* ───────────────────────── Мозги (сменные) ───────────────────────── */
@@ -439,7 +557,7 @@ export async function crawlBrand(env, slug, fetcher = fetch) {
     raw.push(...chunk);
     offset += chunk.length;
     if (chunk.length < PAGE) break;
-    await new Promise((res) => setTimeout(res, 250)); // не долбим сайт
+    await new Promise((res) => setTimeout(res, 1000)); // не долбим сайт: при частых запросах он перестаёт отвечать
   }
 
   const items = toItems(raw);
@@ -481,9 +599,21 @@ async function onSetup(url, env) {
   const r = await tg(env, 'setWebhook', {
     url: url.origin + '/webhook', secret_token: env.WEBHOOK_SECRET, allowed_updates: ['message', 'callback_query'],
   });
-  await tg(env, 'setMyCommands', { commands: [{ command: 'start', description: 'Подобрать микс' }, { command: 'new', description: 'Новый запрос' }] });
-  const d = await tg(env, 'setMyDescription', { description: BOT_DESCRIPTION });
-  const a = await tg(env, 'setMyShortDescription', { short_description: BOT_ABOUT });
+  // Меню команд: по умолчанию русское, для Telegram на армянском — армянское.
+  await tg(env, 'setMyCommands', { commands: [
+    { command: 'start', description: 'Подобрать микс' },
+    { command: 'new', description: 'Новый запрос' },
+    { command: 'language', description: 'Сменить язык / Փոխել լեզուն' },
+  ] });
+  await tg(env, 'setMyCommands', { language_code: 'hy', commands: [
+    { command: 'start', description: 'Ընտրել միքս' },
+    { command: 'new', description: 'Նոր հարցում' },
+    { command: 'language', description: 'Փոխել լեզուն / Сменить язык' },
+  ] });
+  const d = await tg(env, 'setMyDescription', { description: BOT_DESCRIPTION.ru });
+  const a = await tg(env, 'setMyShortDescription', { short_description: BOT_ABOUT.ru });
+  await tg(env, 'setMyDescription', { language_code: 'hy', description: BOT_DESCRIPTION.hy });
+  await tg(env, 'setMyShortDescription', { language_code: 'hy', short_description: BOT_ABOUT.hy });
   return Response.json({ webhook: r, description: d, about: a });
 }
 
