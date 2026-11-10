@@ -2,9 +2,10 @@ name = "mix-bot"
 main = "src/worker.js"
 compatibility_date = "2025-01-01"
 
-# Раз в неделю, понедельник 06:00–06:50 МСК: каждые 10 минут обновляется один бренд из BRANDS по порядку.
+# Раз в неделю, понедельник 06:00–10:50 МСК: каждые 10 минут обновляется один бренд из BRANDS по порядку
+# (30 запусков — хватает на 30 брендов).
 [triggers]
-crons = ["*/10 3 * * 1"]
+crons = ["*/10 3-7 * * 1"]
 
 # Бесплатные модели Cloudflare
 [ai]
@@ -25,8 +26,9 @@ LLM_PROVIDER = "cloudflare"
 LLM_MODEL = "@cf/meta/llama-3.3-70b-instruct-fp8-fast"
 LLM_BASE_URL = ""
 
-# Бренды: как они называются в адресе на htreviews.org/tobaccos/<бренд>. Не больше 6 (по одному на 10 минут расписания).
-BRANDS = "darkside,musthave,bonche,deus,tangiers"
+# Бренды из каталога vektorsigma.am, как они называются в адресе htreviews.org/tobaccos/<бренд>.
+# Не больше 30 (по одному на запуск расписания).
+BRANDS = "al-fakher,bliss,black-burn,bonche,chaba,chabacco,darkside,deus,dogma,endorphin,jent,kraken,macbellzy,musthave,nash,original-virginia,overdose,ready,spectrum,sapphire-crown,sarma,satyr,starline,tangiers,trofimoffs,severnyy,khuligan"
 
 # Картинка к главному миксу: on / off
 IMAGES = "on"
