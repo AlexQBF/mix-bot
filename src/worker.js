@@ -22,7 +22,7 @@ const T = {
   ru: {
     hello:
       'Привет! Я <b>Sigma Mix</b>, твой карманный кальянщик 💨\n\n' +
-      'Напиши что нравится: <i>«хочу ягодное с кислинкой»</i>, <i>«люблю Supernova»</i>, <i>«чтобы освежало, но не мята»</i>.\n\n' +
+      'Напиши что нравится: <i>«хочу ягодное с кислинкой»</i>, <i>«люблю Deus»</i>, <i>«чтобы освежало, но не мята»</i>.\n\n' +
       'Подберу 3 микса с пропорциями и описанием.\n' +
       'Понравилось - бери табачок у нас в VektorSIGMA 🛒\n\n' +
       '<i>Строго 18+</i>',
@@ -53,7 +53,7 @@ const T = {
   hy: {
     hello:
       'Բարև՛։ Ես <b>Sigma Mix</b>-ն եմ՝ քո գրպանի կալյանի վարպետը 💨\n\n' +
-      'Գրիր, թե ինչ է քեզ դուր գալիս՝ <i>«ուզում եմ հատապտղային՝ թթվաշությամբ»</i>, <i>«սիրում եմ Supernova»</i>, <i>«որ թարմացնի, բայց ոչ անանուխ»</i>։\n\n' +
+      'Գրիր, թե ինչ է քեզ դուր գալիս՝ <i>«ուզում եմ հատապտղային՝ թթվաշությամբ»</i>, <i>«սիրում եմ Deus»</i>, <i>«որ թարմացնի, բայց ոչ անանուխ»</i>։\n\n' +
       'Կընտրեմ 3 միքս՝ համամասնություններով և նկարագրությամբ։\n' +
       'Հավանեցի՞ր՝ ծխախոտը գնիր մեզ մոտ՝ VektorSIGMA-ում 🛒\n\n' +
       '<i>Խիստ 18+</i>',
@@ -292,9 +292,15 @@ async function makeMixes(env, chat, session, more = false, lang = 'ru') {
   blocks[blocks.length - 1] += footer;
 
   let photo = null;
-  if ((env.IMAGES || 'on') === 'on' && result.imagePrompt) {
+  if ((env.IMAGES || 'on') === 'on') {
     await action(env, chat, 'upload_photo');
-    photo = await makeImage(env, result.imagePrompt).catch((e) => (console.log('image', e.message), null));
+    const prompt = imagePrompt(result[0], result.garnish, env.IMAGE_TEXT || 'full');
+    photo = await makeImage(env, prompt).catch((e) => (console.log('image', e.message), null));
+    // Основная модель не ответила — пробуем простую запасную, без текста.
+    if (!photo && !(env.IMAGE_MODEL || '').includes('flux-1')) {
+      photo = await makeImage({ ...env, IMAGE_MODEL: '@cf/black-forest-labs/flux-1-schnell' }, imagePrompt(result[0], result.garnish, 'none'))
+        .catch((e) => (console.log('image fallback', e.message), null));
+    }
   }
   for (let i = 0; i < blocks.length; i++) {
     const kb = i === blocks.length - 1 ? resultKeyboard(lang) : undefined;
@@ -396,8 +402,11 @@ async function composeMixes(env, session, candidates, lang = 'ru') {
     'Конкретные вкусы, без воды вроде «гармоничный опыт», «идеально сочетает», «погрузись в мир». Без обещаний про здоровье.\n' +
     '- strength — итоговая крепость микса одним словом: ' + t.llmStrength + '.\n' +
     '- title, text и strength пиши на ' + t.llmLang + ' языке. Названия брендов и табаков в текст не переводи.\n' +
-    '- image — описание картинки для первого микса НА АНГЛИЙСКОМ: натюрморт из ингредиентов вкуса на тёмном фоне, без текста, людей и курительных принадлежностей.\n' +
-    'Верни ТОЛЬКО JSON: {"mixes":[{"title":"","parts":[{"n":1,"p":50}],"text":"","strength":""}],"image":""}';
+    '- Для картинки, только в ПЕРВОМ миксе, у каждого табака добавь "look" НА АНГЛИЙСКОМ: густой глянцевый соус цвета этого вкуса, ' +
+    '3–6 слов, например "glossy deep purple blackberry syrup", "creamy white vanilla cream", "bright orange mango puree".\n' +
+    '- garnish — НА АНГЛИЙСКОМ свежие ингредиенты первого микса для декора вокруг, 3–5 штук через запятую, например "fresh blackberries, blueberries, lemon wedges, mint leaves". ' +
+    'Только еда и напитки: без людей, кальянов и сигарет.\n' +
+    'Верни ТОЛЬКО JSON: {"mixes":[{"title":"","parts":[{"n":1,"p":50,"look":""}],"text":"","strength":""}],"garnish":""}';
   const user =
     'Запрос клиента: ' + session.text + '\n' +
     'Желаемая крепость: ' + want + '\n' +
@@ -405,7 +414,7 @@ async function composeMixes(env, session, candidates, lang = 'ru') {
     '\nТабаки в наличии:\n' + lines.join('\n');
   const out = await llmJson(env, system, user, 1200);
   const mixes = validateMixes(out, candidates);
-  mixes.imagePrompt = out && typeof out.image === 'string' ? out.image.slice(0, 400) : '';
+  mixes.garnish = out && typeof out.garnish === 'string' ? out.garnish.slice(0, 200) : '';
   return mixes;
 }
 
@@ -415,12 +424,12 @@ export function validateMixes(out, candidates) {
   for (const m of (out && Array.isArray(out.mixes) ? out.mixes : []).slice(0, 3)) {
     const seen = new Set();
     let parts = (Array.isArray(m.parts) ? m.parts : [])
-      .map((p) => ({ item: candidates[Number(p.n) - 1], p: Number(p.p) }))
+      .map((p) => ({ item: candidates[Number(p.n) - 1], p: Number(p.p), look: typeof p.look === 'string' ? p.look.slice(0, 80) : '' }))
       .filter((p) => p.item && p.p > 0 && !seen.has(p.item.k) && seen.add(p.item.k))
       .slice(0, 4);
     if (parts.length < 2) continue;
     const sum = parts.reduce((a, p) => a + p.p, 0);
-    parts = parts.map((p) => ({ item: p.item, p: Math.max(5, Math.round((p.p / sum) * 20) * 5) }));
+    parts = parts.map((p) => ({ item: p.item, look: p.look, p: Math.max(5, Math.round((p.p / sum) * 20) * 5) }));
     parts.sort((a, b) => b.p - a.p);
     parts[0].p += 100 - parts.reduce((a, p) => a + p.p, 0); // остаток — в основной табак
     if (parts[0].p <= 0) continue;
@@ -523,14 +532,71 @@ export function parseJson(text) {
   try { return JSON.parse(s.slice(a, b + 1)); } catch (e) { return null; }
 }
 
+/* ───────────────────────── Картинка ─────────────────────────
+ * Стиль — как карточки «SIGMA MIX» на vektorsigma.am/weekly_mix:
+ * светлый фон с серой геометрией, логотип SIGMA MIX сверху, в центре круг-«инь-ян»
+ * из глянцевых соусов цвета каждого вкуса, подписи с долями, свежие ингредиенты по краям.
+ * IMAGE_TEXT: full — логотип и подписи с долями; logo — только логотип; none — без текста.
+ */
+export function imagePrompt(mix, garnish, textMode = 'full') {
+  const parts = mix.parts.slice(0, 4);
+  const n = parts.length;
+  const words = ['', '', 'two', 'three', 'four'][n] || String(n);
+  const sauces = parts.map((p, i) => `segment ${i + 1}: ${p.look || 'a glossy colorful fruit sauce'}`).join('; ');
+  const where = ['upper left', 'upper right', 'bottom', 'lower left'];
+  const labels = parts.map((p, i) =>
+    `at the ${where[i]} of the circle the label "${latin(p.item.n).toUpperCase()}" with "${latin(p.item.b).toUpperCase()}" in bold below it and a large thin "${p.p}%"`).join('; ');
+
+  let text = '';
+  if (textMode === 'full' || textMode === 'logo') {
+    text = 'At the top center, a modern logo: the word "SIGMA" in thin black sans-serif capitals, directly below it the word "MIX" in heavy bold black sans-serif capitals. ';
+  }
+  if (textMode === 'full') {
+    text += `Around the circle, clean minimal uppercase sans-serif labels in dark grey connected with thin dashed lines: ${labels}. All text sharp, correctly spelled, no other text. `;
+  } else {
+    text += textMode === 'none' ? 'No text, no letters, no logos anywhere. ' : 'No other text. ';
+  }
+
+  return (
+    'Square premium advertising poster for a flavor mix, top-down view, light off-white studio background ' +
+    'with subtle minimal light-grey geometric decorations: thin outline circles, small solid triangles, plus signs, dashed lines and diagonal hatching. ' +
+    text +
+    `In the center, a perfect round swirl made of ${words} thick glossy liquid sauces flowing into each other like a yin-yang, ` +
+    `with clear borders between colors, realistic shiny reflections and one small drip at the bottom edge — ${sauces}. ` +
+    (garnish ? `Fresh ingredients scattered around the edges of the frame, partially cropped: ${garnish}. ` : '') +
+    'High-end commercial food photography, soft natural shadows, vibrant saturated colors, crisp focus, clean balanced composition, lots of white space. ' +
+    'No people, no hands, no hookah, no cigarettes, no smoke.'
+  );
+}
+
+/** Кириллицу — латиницей: модель рисования не умеет русские буквы. */
+export function latin(s) {
+  const map = { а: 'a', б: 'b', в: 'v', г: 'g', д: 'd', е: 'e', ё: 'e', ж: 'zh', з: 'z', и: 'i', й: 'y', к: 'k', л: 'l', м: 'm', н: 'n', о: 'o', п: 'p',
+    р: 'r', с: 's', т: 't', у: 'u', ф: 'f', х: 'kh', ц: 'ts', ч: 'ch', ш: 'sh', щ: 'sch', ъ: '', ы: 'y', ь: '', э: 'e', ю: 'yu', я: 'ya' };
+  return String(s).replace(/[а-яё]/gi, (c) => { const l = map[c.toLowerCase()]; return c === c.toLowerCase() ? l : l.charAt(0).toUpperCase() + l.slice(1); })
+    .replace(/[^\x20-\x7E]/g, '').replace(/"/g, '').trim();
+}
+
 async function makeImage(env, prompt) {
-  const model = env.IMAGE_MODEL || '@cf/black-forest-labs/flux-1-schnell';
-  const r = await env.AI.run(model, { prompt: prompt + ', dark moody background, studio food photography, no text', steps: 4 });
+  const model = env.IMAGE_MODEL || '@cf/black-forest-labs/flux-2-klein-4b';
+  let r;
+  if (model.includes('flux-2')) {
+    // Модели FLUX.2 принимают параметры формой (multipart).
+    const form = new FormData();
+    form.append('prompt', prompt);
+    form.append('width', '1024');
+    form.append('height', '1024');
+    const fr = new Response(form);
+    r = await env.AI.run(model, { multipart: { body: fr.body, contentType: fr.headers.get('content-type') } });
+  } else {
+    r = await env.AI.run(model, { prompt, steps: 4 });
+  }
   if (r && typeof r.image === 'string') return Uint8Array.from(atob(r.image), (c) => c.charCodeAt(0));
+  if (r && r.result && typeof r.result.image === 'string') return Uint8Array.from(atob(r.result.image), (c) => c.charCodeAt(0));
   if (r instanceof ReadableStream) return new Uint8Array(await new Response(r).arrayBuffer());
   if (r instanceof ArrayBuffer) return new Uint8Array(r);
   if (r instanceof Uint8Array) return r;
-  return null;
+  throw new Error('неизвестный ответ модели картинок: ' + JSON.stringify(r).slice(0, 200));
 }
 
 /* ───────────────────────── Справочник ───────────────────────── */
