@@ -36,8 +36,11 @@ BRANDS = "deus,khuligan,spectrum,kraken,satyr,original-virginia,morpheus"
 IMAGES = "on"
 # FLUX.2 klein 4B — ~100 «нейронов» за картинку. Запасной вариант: "@cf/black-forest-labs/flux-1-schnell" (проще, без текста).
 IMAGE_MODEL = "@cf/black-forest-labs/flux-2-klein-4b"
-# Текст на картинке: logo — только SIGMA MIX (состав и доли — в тексте под картинкой); full — ещё подписи с долями (бесплатная модель путает буквы); none — без текста.
+# Текст на картинке: logo — только SIGMA MIX (состав и доли — в карточках миксов); none — без текста.
 IMAGE_TEXT = "logo"
+
+# Сколько грамм в чаше — от этого считаются граммы каждого табака в миксе.
+BOWL_GRAMS = "20"
 
 SHOP_URL = "https://vektorsigma.am"
 
