@@ -30,17 +30,28 @@ ADMIN_IDS = ""
 
 # ── Мозги. Чтобы сменить модель, меняются только эти строки ──
 # cloudflare — бесплатно, ключ не нужен
-# anthropic  — Claude, нужен секрет LLM_API_KEY          (LLM_MODEL = "claude-opus-5-5" — самый умный, или "claude-sonnet-5-5" — дешевле)
+# anthropic  — Claude, нужен секрет LLM_API_KEY (ключ с console.anthropic.com):
+#              LLM_MODEL = "claude-sonnet-5-5" — рекомендуем: почти как Opus, вдвое дешевле и быстрее
+#              LLM_MODEL = "claude-opus-5-5"   — самый умный, ~2 цента дороже за подбор
+#              LLM_MODEL_FAST = "claude-haiku-5-5" — для разбора сообщения клиента (простая задача, почти бесплатно)
 # openai     — OpenAI и совместимые, нужен LLM_API_KEY   (LLM_MODEL = "gpt-...", при необходимости LLM_BASE_URL)
 LLM_PROVIDER = "cloudflare"
 LLM_MODEL = "@cf/meta/llama-3.3-70b-instruct-fp8-fast"
+# Пусто — разбор запроса делает та же модель, что и миксы.
+LLM_MODEL_FAST = ""
 LLM_BASE_URL = ""
 
-# Модель картинок. FLUX.2 klein 4B — около 100 «нейронов» за картинку.
-# Запасной вариант: "@cf/black-forest-labs/flux-1-schnell" (проще, хуже рисует текст).
+# ── Картинки ──
+# cloudflare — бесплатно: IMAGE_MODEL = "@cf/black-forest-labs/flux-2-klein-4b"
+# openai     — картинки ChatGPT, нужен секрет IMAGE_API_KEY (ключ с platform.openai.com):
+#              IMAGE_MODEL = "gpt-image-2.5-flare", IMAGE_QUALITY = "medium" (~1,3 цента) или "high" (~5 центов)
+# Если OpenAI не ответил — бот сам нарисует бесплатно на Cloudflare.
+IMAGE_PROVIDER = "cloudflare"
 IMAGE_MODEL = "@cf/black-forest-labs/flux-2-klein-4b"
+IMAGE_QUALITY = "medium"
 
 # Секреты (Settings → Variables and Secrets, тип Secret):
 #   BOT_TOKEN       — токен бота от @BotFather
 #   WEBHOOK_SECRET  — случайная строка (латиница и цифры)
-#   LLM_API_KEY     — только если LLM_PROVIDER не cloudflare
+#   LLM_API_KEY     — только если LLM_PROVIDER не cloudflare (для Claude — ключ Anthropic)
+#   IMAGE_API_KEY   — только если IMAGE_PROVIDER = "openai" (ключ OpenAI)
