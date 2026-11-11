@@ -24,13 +24,13 @@ id = "feb60298be7e4467a50ee0c889bafdc6"
 # редактировать — только приглашённым.
 CONFIG_SHEET_ID = "1iRdMg7O_PXx5F8KR-CfUTeQE9tgrafuypsZxG6MHz_4"
 
-# Запасной список админов (Telegram ID через запятую) — на случай, если вкладка «Админы» в таблице пустая.
+# Запасной список админов (Telegram ID через запятую) — на случай, если admins во вкладке «Настройки» пустой.
 # Свой ID можно узнать командой /id у бота.
 ADMIN_IDS = ""
 
 # ── Мозги. Чтобы сменить модель, меняются только эти строки ──
 # cloudflare — бесплатно, ключ не нужен
-# anthropic  — Claude, нужен секрет LLM_API_KEY          (LLM_MODEL = "claude-sonnet-5-5")
+# anthropic  — Claude, нужен секрет LLM_API_KEY          (LLM_MODEL = "claude-opus-5-5" — самый умный, или "claude-sonnet-5-5" — дешевле)
 # openai     — OpenAI и совместимые, нужен LLM_API_KEY   (LLM_MODEL = "gpt-...", при необходимости LLM_BASE_URL)
 LLM_PROVIDER = "cloudflare"
 LLM_MODEL = "@cf/meta/llama-3.3-70b-instruct-fp8-fast"
