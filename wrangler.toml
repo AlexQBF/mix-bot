@@ -2,22 +2,32 @@ name = "mix-bot"
 main = "src/worker.js"
 compatibility_date = "2025-01-01"
 
-# Раз в неделю, понедельник 06:00–10:50 МСК: каждые 10 минут обновляется один бренд из BRANDS по порядку
-# (30 запусков — хватает на 30 брендов).
+# Расписание:
+#  - каждые 15 минут: бот читает Google Таблицу с настройками и, если что-то поменялось, применяет;
+#  - понедельник 06:00–10:50 МСК, каждые 10 минут: обновляет вкусы одного бренда с htreviews (до 30 брендов).
 [triggers]
-crons = ["*/10 3-7 * * 1"]
+crons = ["*/15 * * * *", "*/10 3-7 * * 1"]
 
 # Бесплатные модели Cloudflare
 [ai]
 binding = "AI"
 
-# Хранилище: справочник табаков и диалоги.
+# Хранилище: справочник табаков, копия настроек из таблицы, диалоги.
 # Создать: Storage & Databases → KV → Create → имя mix-bot, вставить ID сюда.
 [[kv_namespaces]]
 binding = "KV"
 id = "feb60298be7e4467a50ee0c889bafdc6"
 
 [vars]
+# ── Все правила, тексты и параметры бота — в этой Google Таблице ──
+# Доступ к таблице: «Все, у кого есть ссылка» — «Читатель» (иначе бот её не прочитает),
+# редактировать — только приглашённым.
+CONFIG_SHEET_ID = "1iRdMg7O_PXx5F8KR-CfUTeQE9tgrafuypsZxG6MHz_4"
+
+# Запасной список админов (Telegram ID через запятую) — на случай, если вкладка «Админы» в таблице пустая.
+# Свой ID можно узнать командой /id у бота.
+ADMIN_IDS = ""
+
 # ── Мозги. Чтобы сменить модель, меняются только эти строки ──
 # cloudflare — бесплатно, ключ не нужен
 # anthropic  — Claude, нужен секрет LLM_API_KEY          (LLM_MODEL = "claude-sonnet-5-5")
@@ -26,23 +36,9 @@ LLM_PROVIDER = "cloudflare"
 LLM_MODEL = "@cf/meta/llama-3.3-70b-instruct-fp8-fast"
 LLM_BASE_URL = ""
 
-# Бренды, из которых бот собирает миксы (только наши). Через запятую, как в адресе htreviews.org/tobaccos/<бренд>.
-# Добавить бренд: дописать сюда → Commit → открыть /refresh?key=... Не больше 30.
-# deus — Deus, khuligan — Хулиган, spectrum — Spectrum, kraken — Kraken, satyr — Satyr,
-# original-virginia — Original Virginia, morpheus — Morpheus
-BRANDS = "deus,khuligan,spectrum,kraken,satyr,original-virginia,morpheus"
-
-# Картинка к главному миксу: on / off
-IMAGES = "on"
-# FLUX.2 klein 4B — ~100 «нейронов» за картинку. Запасной вариант: "@cf/black-forest-labs/flux-1-schnell" (проще, без текста).
+# Модель картинок. FLUX.2 klein 4B — около 100 «нейронов» за картинку.
+# Запасной вариант: "@cf/black-forest-labs/flux-1-schnell" (проще, хуже рисует текст).
 IMAGE_MODEL = "@cf/black-forest-labs/flux-2-klein-4b"
-# Текст на картинке: logo — только SIGMA MIX (состав и доли — в карточках миксов); none — без текста.
-IMAGE_TEXT = "logo"
-
-# Сколько грамм в чаше — от этого считаются граммы каждого табака в миксе.
-BOWL_GRAMS = "20"
-
-SHOP_URL = "https://vektorsigma.am"
 
 # Секреты (Settings → Variables and Secrets, тип Secret):
 #   BOT_TOKEN       — токен бота от @BotFather
