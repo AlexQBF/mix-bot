@@ -3,24 +3,23 @@
  *
  * Клиент пишет в свободной форме, что любит и как крепко курит →
  * ИИ разбирает запрос → код отбирает подходящие табаки из справочника →
- * ИИ собирает 3 микса → одна картинка на три микса + три карточки текстом.
+ * ИИ собирает 3 микса по инструкции из Google Таблицы → одна картинка + три карточки.
  *
- * ВСЕ правила, тексты и параметры живут в Google Таблице (CONFIG_SHEET_ID).
- * Бот раз в 15 минут (или по команде /reload) читает таблицу, проверяет её
- * и кладёт копию в KV. Клиентские запросы в таблицу не ходят — только в копию.
- * Если таблица недоступна или заполнена с ошибкой — работает прежняя копия,
- * а если копии ещё нет — значения по умолчанию из этого файла (DEFAULTS).
+ * Google Таблица (CONFIG_SHEET_ID) — пульт управления:
+ *   «Инструкция»   — как собирать миксы и писать описания, обычным языком;
+ *   «Ограничения»  — что менеджер заметил на проверке («X не сочетать с Y»), главнее инструкции;
+ *   «Настройки»    — граммы, доли, повторы, крепкое только по запросу, картинки, админы;
+ *   «Бренды», «Тексты бота».
+ * Бот раз в 15 минут (или по /reload) читает таблицу, проверяет и кладёт копию в KV.
+ * Клиентские запросы в таблицу не ходят. Ошибка в таблице — работает прежняя копия.
  *
- * Справочник вкусов собирается с htreviews.org по брендам из таблицы и лежит в KV.
- *
- * Секреты:  BOT_TOKEN, WEBHOOK_SECRET, LLM_API_KEY (только для внешних мозгов)
+ * Секреты:  BOT_TOKEN, WEBHOOK_SECRET, LLM_API_KEY (для Claude и других платных мозгов)
  * Биндинги: KV (хранилище), AI (Workers AI)
  * wrangler.toml [vars]: CONFIG_SHEET_ID, ADMIN_IDS, LLM_PROVIDER, LLM_MODEL, LLM_BASE_URL, IMAGE_MODEL
  */
 
 /* ═════════════════════════ Значения по умолчанию ═════════════════════════
- * Это же содержимое лежит в Google Таблице. Таблица главнее: всё, что в ней заполнено,
- * перекрывает эти значения. Здесь — страховка на случай, если таблица недоступна.
+ * То же самое лежит в Google Таблице. Таблица главнее; здесь — страховка, если таблица недоступна.
  */
 
 // «Да» / «нет» в таблице — любые привычные варианты.
@@ -87,135 +86,97 @@ export const DEFAULT_TEXTS = {
   cmd_language: ['Сменить язык / Փոխել լեզուն', 'Փոխել լեզուն / Сменить язык', 'Меню команд: /language'],
 };
 
-// Параметры: ключ → значение по умолчанию, описание, проверка.
+// Какие тексты показываем в таблице (остальные — служебные, живут в коде, но их тоже можно добавить строкой в таблицу).
+const MAIN_TEXT_KEYS = ['hello', 'choose_lang', 'lang_set', 'ask_strength', 'btn_light', 'btn_medium', 'btn_strong', 'btn_any',
+  'cover', 'mix_of', 'best', 'strength_label', 'bowl_note', 'footer', 'btn_more', 'btn_new', 'description', 'about'];
+
+// Настройки: то, что код гарантирует сам, независимо от ИИ. Видно и меняется в таблице.
 export const DEFAULT_SETTINGS = [
-  { key: 'bowl_grams', def: '20', type: 'int', min: 5, max: 60, desc: 'Сколько грамм в чаше. От этого считаются граммы каждого табака в миксе.' },
-  { key: 'max_tobaccos', def: '4', type: 'int', min: 2, max: 6, desc: 'Максимум табаков в одном миксе (минимум всегда 2).' },
-  { key: 'strongish_max', def: '30', type: 'int', min: 5, max: 100, desc: 'Если клиент хочет лёгкое или среднее: табаки «средне-крепкая» — не больше этой доли микса, %.' },
+  { key: 'bowl_grams', def: '20', type: 'int', min: 5, max: 60, desc: 'Сколько грамм в чаше. Граммы каждого табака = его доля × чаша.' },
+  { key: 'min_tobaccos', def: '2', type: 'int', min: 2, max: 6, desc: 'Минимум табаков в одном миксе.' },
+  { key: 'max_tobaccos', def: '4', type: 'int', min: 2, max: 6, desc: 'Максимум табаков в одном миксе.' },
+  { key: 'share_step', def: '5', type: 'int', min: 1, max: 25, desc: 'Доли в миксе кратны этому числу, %. Сумма долей всегда 100%.' },
+  { key: 'no_repeats', def: 'да', type: 'yesno', desc: 'Один табак — только в одном миксе из трёх (да / нет).' },
+  { key: 'strong_only_on_request', def: 'да', type: 'yesno', desc: 'Крепкие табаки и крепкие линейки — только если клиент сам попросил крепко (да / нет).' },
   { key: 'strong_words', def: 'hard, strong, ligero, zombie, зомби, крепк, хард', type: 'list',
-    desc: 'Слова в названии линейки или вкуса, по которым табак считается крепким. Такие табаки предлагаем, только если клиент сам попросил крепко.' },
-  { key: 'helper_groups', def: 'Освежающий, Цитрусовый, Ягодный', type: 'list',
-    desc: 'Группы вкусов, которые бот всегда подмешивает ИИ «для баланса» (кислинка, свежесть). Названия групп — как на htreviews.' },
-  { key: 'candidates', def: '45', type: 'int', min: 10, max: 80, desc: 'Сколько самых подходящих табаков бот даёт ИИ на выбор. Больше — богаче выбор, но ИИ дольше думает и тратит больше лимита.' },
-  { key: 'helpers', def: '12', type: 'int', min: 0, max: 30, desc: 'Сколько табаков «для баланса» добавлять к ним.' },
-  { key: 'images', def: 'да', type: 'yesno', desc: 'Рисовать картинку к миксам: да / нет. Картинка — около трети расхода бесплатного лимита ИИ.' },
-  { key: 'image_logo', def: 'да', type: 'yesno', desc: 'Надпись SIGMA MIX на картинке: да / нет.' },
+    desc: 'По каким словам в названии линейки или вкуса табак считается крепким. Через запятую.' },
+  { key: 'only_in_stock', def: 'да', type: 'yesno', desc: 'Только то, что есть на складе (да / нет). Заработает, когда подключим выгрузку склада; до этого — все вкусы наших брендов.' },
+  { key: 'images', def: 'да', type: 'yesno', desc: 'Рисовать картинку к миксам (да / нет). Как она выглядит — во вкладке «Инструкция».' },
   { key: 'shop_url', def: 'https://vektorsigma.am', type: 'text', desc: 'Ссылка на магазин под миксами. Пусто — без ссылки.' },
+  { key: 'admins', def: '', type: 'ids', desc: 'Telegram ID админов через запятую: могут /reload и /config и получают уведомления. Свой ID — команда /id у бота.' },
 ];
 
-// Бренды: код на htreviews.org/tobaccos/<код>, название, включён, как ещё пишут клиенты.
+// Бренды: код на htreviews.org/tobaccos/<код>, название, включён.
 export const DEFAULT_BRANDS = [
-  { code: 'deus', name: 'Deus', on: true, aliases: 'деус, деуc, deus tobacco' },
-  { code: 'khuligan', name: 'Хулиган', on: true, aliases: 'хулик, хулиган поп, hooligan, huligan' },
-  { code: 'spectrum', name: 'Spectrum', on: true, aliases: 'спектр, спектрум, спектрим' },
-  { code: 'kraken', name: 'Kraken', on: true, aliases: 'кракен, крякен' },
-  { code: 'satyr', name: 'Satyr', on: true, aliases: 'сатир, сатyр, сатирь' },
-  { code: 'original-virginia', name: 'Original Virginia', on: true, aliases: 'ориджинал, оригинал вирджиния, вирджиния, OV, ОВ' },
-  { code: 'morpheus', name: 'Morpheus', on: true, aliases: 'морфеус, морфей' },
+  { code: 'deus', name: 'Deus', on: true },
+  { code: 'khuligan', name: 'Хулиган', on: true },
+  { code: 'spectrum', name: 'Spectrum', on: true },
+  { code: 'kraken', name: 'Kraken', on: true },
+  { code: 'satyr', name: 'Satyr', on: true },
+  { code: 'original-virginia', name: 'Original Virginia', on: true },
+  { code: 'morpheus', name: 'Morpheus', on: true },
 ];
 
-// Поправки крепости: бренд или бренд/линейка (как в адресе htreviews) → крепость 1–5 «не ниже».
-export const DEFAULT_STRENGTH = [
-  { key: 'kraken', s: 4, note: 'Kraken на деле крепче, чем пишет htreviews (фидбек команды)' },
+// Инструкция для ИИ — обычным языком, строка = абзац. Заголовки разделов — просто для удобства чтения.
+export const DEFAULT_INSTRUCTION = [
+  'КТО ТЫ',
+  'Ты — опытный кальянный мастер магазина VektorSIGMA. Подбираешь клиенту 3 микса из табаков, которые есть у нас.',
+  'КАК СОБИРАТЬ',
+  'Первый микс — максимально точное попадание в запрос. Второй и третий — альтернативы с другим характером, чтобы клиенту было из чего выбрать.',
+  'Микс не должен быть однобоким. Если основа сладкая (десерт, сливки, шоколад, выпечка, орехи, карамель) — обязательно оттени её кислинкой, цитрусом или свежестью на 15–25%. Три десерта в одном миксе — нельзя, если клиент прямо не просил «чистый десерт».',
+  'Яркие вкусы забивают остальные: гуава, мята, холодок, корица, кардамон, гвоздика, кофе, роза, лаванда, хвоя, эвкалипт, табак, сигара. Давай их только акцентом — до 20%, если клиент сам не просил именно этот вкус.',
+  'Не ставь в один микс два почти одинаковых вкуса (две мяты, две малины), если клиент не просил усилить именно его.',
+  'КРЕПОСТЬ',
+  'Учитывай, как крепко курит клиент. Если лёгко или средне — табаков с крепостью «средне-крепкая» не больше 30% в миксе.',
+  'Kraken на деле крепче, чем пишут на htreviews: считай его средне-крепким.',
+  'ОПИСАНИЯ',
+  'Название микса — 2–3 слова, аппетитно, как десерт или коктейль: «Аперольный закат», «Игристые тропики», «Черничный чизкейк», «Апельсиновый брауни».',
+  'Описание — 1–2 предложения, до 30 слов, на «ты». У каждого вкуса — сочный эпитет (спелый, тягучий, ледяной, бархатный), скажи, чем вкусы дополняют друг друга и какое ощущение в итоге. Без воды вроде «гармоничный опыт», без обещаний про здоровье. Описание должно честно соответствовать вкусам.',
+  'Примеры наших описаний: «Яркий гранатовый апероль, сочный апельсин и нежный белый персик создают летний коктейльный вкус с мягкой горчинкой.» «Насыщенная ежевика с винной ноткой сочетается со сливочным черничным йогуртом, а медовый персик делает вкус мягким и округлым.» «Лёгкое игристое вино, сочный манго-ананас и яркая цитрусовая кислинка юдзу создают освежающий тропический вкус.»',
+  'КАРТИНКА',
+  'Одна квадратная картинка на все три микса, премиальная рекламная фуд-съёмка сверху. Светлый почти белый фон с лёгкой серой геометрией: тонкие круги, треугольники, плюсики, пунктир, штриховка.',
+  'Сверху по центру логотип: слово SIGMA тонкими чёрными буквами, под ним MIX жирными чёрными буквами. Больше никакого текста, цифр и процентов на картинке.',
+  'Под логотипом в один ряд три круга одинакового размера — микс 1, 2, 3 слева направо. Каждый круг — густые глянцевые соусы цвета вкусов микса, перетекающие друг в друга как инь-ян, с капелькой снизу.',
+  'По краям кадра свежие ингредиенты миксов, частично обрезанные краем. Сочные цвета, мягкие тени, много воздуха. Без людей, рук, кальянов, сигарет и дыма.',
 ];
 
-// Акцентные вкусы: забивают остальные, поэтому в миксе только акцентом — не больше max %, если клиент сам их не просил.
-export const DEFAULT_ACCENTS = ['Гуава', 'Кардамон', 'Корица', 'Гвоздика', 'Анис', 'Бадьян', 'Кофе', 'Роза', 'Лаванда', 'Хвоя', 'Мята', 'Холодок',
-  'Перец', 'Имбирь', 'Чай', 'Табак', 'Сигара', 'Полынь', 'Эвкалипт', 'Жвачка', 'Абсент', 'Базилик', 'Тархун']
-  .map((tag) => ({ tag, max: 20, note: '' }));
-
-// Правила сборки миксов — смысловая часть задания для ИИ. {max_tobaccos}, {strongish_max} подставляются из настроек.
-export const DEFAULT_RULES = [
-  'Первый микс — максимально точное попадание в запрос. Второй и третий — альтернативы с другим характером.',
-  'В миксе от 2 до {max_tobaccos} табаков, доли кратны 5, в сумме ровно 100.',
-  'Каждый табак — только в ОДНОМ из трёх миксов, не повторяй.',
-  'БАЛАНС: микс не должен быть однобоким. Если основа сладкая (десерт, сливки, шоколад, выпечка, орехи, карамель), обязательно добавь контрастную ноту 15–25%: кислая ягода, цитрус, фрукт с кислинкой или свежесть. Три десертных вкуса в одном миксе — нельзя, если клиент прямо не просил «чистый десерт».',
-  'Табаки с пометкой «ТОЛЬКО АКЦЕНТ» сильно забивают остальные — давай им не больше указанного процента.',
-  'Учитывай желаемую крепость. Если клиент хочет лёгкое или среднее, табаки с крепостью «средне-крепкая» — не больше {strongish_max}% в миксе.',
-  'Не бери вкусы, которых клиент просил избегать.',
-].map((text) => ({ on: true, text }));
-
-// Стиль названий и описаний миксов.
-export const DEFAULT_STYLE = [
-  { key: 'title_rule', text: 'короткое аппетитное название микса, 2–3 слова, как десерт или коктейль: «Аперольный закат», «Игристые тропики», «Черничный чизкейк», «Апельсиновый брауни».' },
-  { key: 'text_rule', text: '1–2 предложения, до 30 слов. У каждого вкуса — сочный эпитет (спелый, тягучий, ледяной, бархатный, хрустящий), скажи, чем вкусы дополняют друг друга и какое ощущение в итоге. Чувственно и аппетитно, без воды вроде «гармоничный опыт», «погрузись в мир». Без обещаний про здоровье.' },
-  { key: 'example', text: 'Яркий гранатовый апероль, сочный апельсин и нежный белый персик создают летний коктейльный вкус с мягкой горчинкой.' },
-  { key: 'example', text: 'Насыщенная ежевика с винной ноткой сочетается со сливочным черничным йогуртом, а медовый персик делает вкус мягким и округлым.' },
-  { key: 'example', text: 'Лёгкое игристое вино, сочный манго-ананас и яркая цитрусовая кислинка юдзу создают освежающий тропический вкус.' },
-  { key: 'extra', text: 'Описание должно честно соответствовать вкусам: не называй микс «освежающим», если в нём нет свежести или цитруса.' },
-  { key: 'extra', text: 'Следи за грамматикой и родом слов: «бархатная карамель», «тягучий шоколад».' },
-];
-
-// Картинка — части задания для модели рисования (по-английски: так она понимает лучше). {count} — сколько миксов.
-export const DEFAULT_IMAGE = [
-  { key: 'background', text: 'Square premium advertising poster for flavor mixes, top-down view, light off-white studio background with subtle minimal light-grey geometric decorations: thin outline circles, small solid triangles, plus signs, dashed lines and diagonal hatching.',
-    desc: 'Фон и общий стиль' },
-  { key: 'logo', text: 'At the top center, a modern logo: the word "SIGMA" in thin black sans-serif capitals, directly below it the word "MIX" in heavy bold black sans-serif capitals. The SIGMA MIX logo is the ONLY text in the image: no other words, no labels, no numbers, no percentages anywhere.',
-    desc: 'Логотип (если в настройках image_logo = да)' },
-  { key: 'no_text', text: 'No text, no letters, no logos anywhere.', desc: 'Вместо логотипа, если image_logo = нет' },
-  { key: 'layout', text: 'Below the logo, {count} separate round swirls of the same size arranged in one horizontal row from left to right, evenly spaced.',
-    desc: 'Раскладка кругов; {count} — сколько миксов' },
-  { key: 'swirl', text: 'Each swirl is made of thick glossy liquid sauces flowing into each other like a yin-yang, with clear borders between colors, realistic shiny reflections and one small drip at the bottom edge',
-    desc: 'Как выглядит один круг. Дальше бот сам допишет цвета соусов каждого микса' },
-  { key: 'garnish', text: 'Fresh ingredients scattered around the edges of the frame, partially cropped:', desc: 'Ингредиенты по краям. Дальше бот допишет ингредиенты миксов' },
-  { key: 'quality', text: 'High-end commercial food photography, soft natural shadows, vibrant saturated colors, crisp focus, clean balanced composition, lots of white space.',
-    desc: 'Качество и подача' },
-  { key: 'bans', text: 'No people, no hands, no hookah, no cigarettes, no smoke.', desc: 'Что запрещено рисовать' },
+// Ограничения — то, что менеджер заметил на проверке. Модель считает их главнее инструкции.
+export const DEFAULT_LIMITS = [
+  { text: 'Guava Supreme и любая гуава забивают всё — не больше 15% и только с яркими фруктами.', who: 'Команда', when: '10.11.2026' },
+  { text: 'Не собирать микс только из десертов: Rum Cake + Cream Waffles + Creme Brulee — приторно, так нельзя.', who: 'Команда', when: '10.11.2026' },
 ];
 
 export const DEFAULTS = {
   settings: Object.fromEntries(DEFAULT_SETTINGS.map((s) => [s.key, parseSetting(s, s.def).value])),
+  instruction: DEFAULT_INSTRUCTION,
+  limits: DEFAULT_LIMITS.map((l) => l.text),
   brands: DEFAULT_BRANDS,
-  strength: DEFAULT_STRENGTH,
-  accents: DEFAULT_ACCENTS,
-  rules: DEFAULT_RULES.map((r) => r.text),
-  style: {
-    title_rule: DEFAULT_STYLE.find((x) => x.key === 'title_rule').text,
-    text_rule: DEFAULT_STYLE.find((x) => x.key === 'text_rule').text,
-    examples: DEFAULT_STYLE.filter((x) => x.key === 'example').map((x) => x.text),
-    extra: DEFAULT_STYLE.filter((x) => x.key === 'extra').map((x) => x.text),
-  },
-  image: Object.fromEntries(DEFAULT_IMAGE.map((x) => [x.key, x.text])),
   texts: Object.fromEntries(Object.entries(DEFAULT_TEXTS).map(([k, v]) => [k, { ru: v[0], hy: v[1] }])),
-  admins: [],
 };
 
 /* ═════════════════════════ Google Таблица ═════════════════════════
- * Вкладки и их колонки. Названия вкладок и первая строка (заголовки) — не менять:
- * по ним бот понимает, что читает. Строки ниже заголовка — можно править, добавлять, удалять.
+ * Названия вкладок и первая строка (заголовки) — не менять: по ним бот понимает, что читает.
  */
 export const SHEET_TABS = [
+  { name: 'Инструкция', head: ['Инструкция для миксолога'] },
+  { name: 'Ограничения', head: ['Ограничение', 'Кто добавил', 'Когда'] },
   { name: 'Настройки', head: ['Параметр', 'Значение', 'Что это'] },
-  { name: 'Бренды', head: ['Код на htreviews', 'Название', 'Включён', 'Как ещё пишут клиенты'] },
-  { name: 'Крепость', head: ['Бренд или линейка', 'Крепость 1–5', 'Комментарий'] },
-  { name: 'Акценты', head: ['Вкус', 'Макс. доля %', 'Комментарий'] },
-  { name: 'Правила миксов', head: ['Включено', 'Правило'] },
-  { name: 'Стиль описаний', head: ['Что', 'Текст'] },
-  { name: 'Картинка', head: ['Часть', 'Текст (по-английски)', 'Что это'] },
+  { name: 'Бренды', head: ['Код на htreviews', 'Название', 'Включён'] },
   { name: 'Тексты бота', head: ['Ключ', 'Русский', 'Армянский', 'Где показывается'] },
-  { name: 'Админы', head: ['Имя', 'Telegram ID'] },
 ];
+const SECTION_NAMES = { instruction: 'инструкция', limits: 'ограничения', settings: 'настройки', brands: 'бренды', texts: 'тексты бота' };
+
 /** Содержимое таблицы по умолчанию (вкладка → строки с заголовком). Из него заполнена Google Таблица. */
 export function sheetRows() {
   const H = Object.fromEntries(SHEET_TABS.map((t) => [t.name, t.head]));
-  const yn = (b) => (b ? 'да' : 'нет');
   return {
+    'Инструкция': [H['Инструкция'], ...DEFAULT_INSTRUCTION.map((x) => [x])],
+    'Ограничения': [H['Ограничения'], ...DEFAULT_LIMITS.map((l) => [l.text, l.who, l.when])],
     'Настройки': [H['Настройки'], ...DEFAULT_SETTINGS.map((s) => [s.key, s.def, s.desc])],
-    'Бренды': [H['Бренды'], ...DEFAULT_BRANDS.map((b) => [b.code, b.name, yn(b.on), b.aliases])],
-    'Крепость': [H['Крепость'], ...DEFAULT_STRENGTH.map((x) => [x.key, String(x.s), x.note])],
-    'Акценты': [H['Акценты'], ...DEFAULT_ACCENTS.map((x) => [x.tag, String(x.max), x.note])],
-    'Правила миксов': [H['Правила миксов'], ...DEFAULT_RULES.map((r) => [yn(r.on), r.text])],
-    'Стиль описаний': [H['Стиль описаний'], ...DEFAULT_STYLE.map((x) => [x.key, x.text])],
-    'Картинка': [H['Картинка'], ...DEFAULT_IMAGE.map((x) => [x.key, x.text, x.desc])],
-    'Тексты бота': [H['Тексты бота'], ...Object.entries(DEFAULT_TEXTS).map(([k, v]) => [k, v[0], v[1], v[2]])],
-    'Админы': [H['Админы']],
+    'Бренды': [H['Бренды'], ...DEFAULT_BRANDS.map((b) => [b.code, b.name, b.on ? 'да' : 'нет'])],
+    'Тексты бота': [H['Тексты бота'], ...MAIN_TEXT_KEYS.map((k) => [k, DEFAULT_TEXTS[k][0], DEFAULT_TEXTS[k][1], DEFAULT_TEXTS[k][2]])],
   };
 }
-
-const SECTION_NAMES = {
-  settings: 'настройки', brands: 'бренды', strength: 'крепость', accents: 'акценты', rules: 'правила миксов',
-  style: 'стиль описаний', image: 'картинка', texts: 'тексты бота', admins: 'админы',
-};
 
 /** CSV одной вкладки. gviz отдаёт вкладку по названию; headers=1 — первая строка всегда заголовок. */
 function sheetUrl(id, tab) {
@@ -253,6 +214,12 @@ function parseSetting(def, raw) {
     return { error: `должно быть «да» или «нет», а стоит «${v}»` };
   }
   if (def.type === 'list') return { value: v.split(',').map((x) => x.trim()).filter(Boolean) };
+  if (def.type === 'ids') {
+    const ids = v.split(/[,;\s]+/).map((x) => x.trim()).filter(Boolean);
+    const bad = ids.find((x) => !/^\d{4,15}$/.test(x));
+    if (bad) return { error: `«${bad}» — не похоже на Telegram ID (только цифры). Свой ID — команда /id у бота` };
+    return { value: ids };
+  }
   return { value: v };
 }
 
@@ -277,6 +244,17 @@ export function buildConfig(tabs) {
       .filter((r) => r.c.some((x) => x));
   };
 
+  // Инструкция: просто строки текста
+  const ins = body('Инструкция');
+  if (ins) {
+    cfg.instruction = ins.map((r) => r.c[0]).filter(Boolean);
+    if (cfg.instruction.join(' ').length < 50) errors.push('Инструкция: почти пустая — так ИИ не поймёт, как собирать миксы');
+  }
+
+  // Ограничения: строки текста (кто и когда — для людей)
+  const lim = body('Ограничения');
+  if (lim) cfg.limits = lim.map((r) => r.c[0]).filter(Boolean);
+
   // Настройки
   const st = body('Настройки');
   if (st) {
@@ -287,6 +265,7 @@ export function buildConfig(tabs) {
       if (p.error) errors.push(`Настройки, строка ${r.n} (${def.key}): ${p.error}`);
       else cfg.settings[def.key] = p.value;
     }
+    if (cfg.settings.min_tobaccos > cfg.settings.max_tobaccos) errors.push('Настройки: min_tobaccos больше, чем max_tobaccos');
   }
 
   // Бренды
@@ -294,71 +273,16 @@ export function buildConfig(tabs) {
   if (br) {
     const list = [];
     for (const r of br) {
-      const [code, name, on, aliases] = r.c;
+      const [code, name, on] = r.c;
       if (!/^[a-z0-9-]+$/.test(code || '')) { errors.push(`Бренды, строка ${r.n}: код «${code}» — только латиница, цифры и дефис, как в адресе htreviews.org/tobaccos/<код>`); continue; }
-      const isOn = on === '' ? true : YES.includes(on.toLowerCase()) ? true : NO.includes(on.toLowerCase()) ? false : null;
+      const v = (on || '').toLowerCase();
+      const isOn = v === '' ? true : YES.includes(v) ? true : NO.includes(v) ? false : null;
       if (isOn === null) { errors.push(`Бренды, строка ${r.n}: «Включён» должно быть «да» или «нет»`); continue; }
-      list.push({ code, name: name || code, on: isOn, aliases: aliases || '' });
+      list.push({ code, name: name || code, on: isOn });
     }
     if (!list.some((b) => b.on)) errors.push('Бренды: должен быть включён хотя бы один бренд');
     if (list.filter((b) => b.on).length > 30) errors.push('Бренды: включено больше 30 — еженедельное обновление не успеет скачать все');
     cfg.brands = list;
-  }
-
-  // Крепость
-  const sr = body('Крепость');
-  if (sr) {
-    cfg.strength = [];
-    for (const r of sr) {
-      const [key, s, note] = r.c;
-      const n = Number(s);
-      if (!/^[a-z0-9-]+(\/[a-z0-9-]+)*$/.test(key || '')) { errors.push(`Крепость, строка ${r.n}: «${key}» — нужен код бренда или бренд/линейка латиницей, как в адресе htreviews (например kraken или khuligan/hard)`); continue; }
-      if (!(n >= 1 && n <= 5 && Number.isInteger(n))) { errors.push(`Крепость, строка ${r.n}: крепость — целое число от 1 до 5`); continue; }
-      cfg.strength.push({ key, s: n, note: note || '' });
-    }
-  }
-
-  // Акценты
-  const ac = body('Акценты');
-  if (ac) {
-    cfg.accents = [];
-    for (const r of ac) {
-      const [tag, max, note] = r.c;
-      const n = Number(String(max).replace('%', '').replace(',', '.'));
-      if (!tag) continue;
-      if (!(n >= 5 && n <= 100)) { errors.push(`Акценты, строка ${r.n} (${tag}): доля — число от 5 до 100`); continue; }
-      cfg.accents.push({ tag, max: Math.round(n), note: note || '' });
-    }
-  }
-
-  // Правила миксов
-  const ru = body('Правила миксов');
-  if (ru) {
-    cfg.rules = ru.filter((r) => r.c[1] && !NO.includes((r.c[0] || 'да').toLowerCase())).map((r) => r.c[1]);
-    if (!cfg.rules.length) errors.push('Правила миксов: должно быть включено хотя бы одно правило');
-  }
-
-  // Стиль описаний
-  const sy = body('Стиль описаний');
-  if (sy) {
-    const get = (k) => sy.filter((r) => r.c[0] === k && r.c[1]).map((r) => r.c[1]);
-    cfg.style = {
-      title_rule: get('title_rule')[0] || '', text_rule: get('text_rule')[0] || '',
-      examples: get('example').map((x) => x.replace(/^[«"]+|[»"]+$/g, '')), extra: get('extra'),
-    };
-    if (!cfg.style.title_rule) errors.push('Стиль описаний: нет строки title_rule (как называть миксы)');
-    if (!cfg.style.text_rule) errors.push('Стиль описаний: нет строки text_rule (как писать описание)');
-    for (const r of sy) if (!['title_rule', 'text_rule', 'example', 'extra'].includes(r.c[0])) warnings.push(`Стиль описаний, строка ${r.n}: неизвестное «${r.c[0]}» — пропущено`);
-  }
-
-  // Картинка
-  const im = body('Картинка');
-  if (im) {
-    for (const r of im) {
-      if (!(r.c[0] in DEFAULTS.image)) { warnings.push(`Картинка, строка ${r.n}: неизвестная часть «${r.c[0]}» — пропущена`); continue; }
-      if (!r.c[1]) { warnings.push(`Картинка, строка ${r.n} (${r.c[0]}): пусто — беру текст по умолчанию`); continue; }
-      cfg.image[r.c[0]] = r.c[1];
-    }
   }
 
   // Тексты бота
@@ -375,18 +299,6 @@ export function buildConfig(tabs) {
         if (key === 'about' && val.length > 120) { warnings.push(`Тексты бота (about): длиннее 120 знаков — беру по умолчанию`); continue; }
         cfg.texts[key][lang] = val;
       }
-    }
-  }
-
-  // Админы
-  const ad = body('Админы');
-  if (ad) {
-    cfg.admins = [];
-    for (const r of ad) {
-      const id = (r.c[1] || '').replace(/\s/g, '');
-      if (!id) continue;
-      if (!/^\d{4,15}$/.test(id)) { warnings.push(`Админы, строка ${r.n}: «${r.c[1]}» — не похоже на Telegram ID (только цифры). Узнать свой: команда /id у бота`); continue; }
-      cfg.admins.push(id);
     }
   }
   return { cfg, errors, warnings };
@@ -414,7 +326,7 @@ export async function loadConfig(env) {
   const d = JSON.parse(JSON.stringify(DEFAULTS));
   const c = stored && stored.cfg ? stored.cfg : {};
   // Глубоко сливаем с умолчаниями: если в коде появился новый параметр или текст, а в копии его ещё нет.
-  const cfg = { ...d, ...c, settings: { ...d.settings, ...c.settings }, image: { ...d.image, ...c.image }, texts: { ...d.texts, ...c.texts }, _at: stored ? stored.at : null };
+  const cfg = { ...d, ...c, settings: { ...d.settings, ...c.settings }, texts: { ...d.texts, ...c.texts }, _at: stored ? stored.at : null };
   cfgCache = { at: Date.now(), cfg };
   return cfg;
 }
@@ -509,6 +421,10 @@ const PAGE = 20; // сайт сам грузит по 20, большие пор�
 const STRENGTH = { 'лёгкая': 1, 'легкая': 1, 'средне-лёгкая': 2, 'средне-легкая': 2, 'средняя': 3, 'средне-крепкая': 4, 'крепкая': 5 };
 const STRENGTH_NAME = ['', 'лёгкая', 'средне-лёгкая', 'средняя', 'средне-крепкая', 'крепкая'];
 const CRON_CONFIG = '*/15 * * * *';
+// Сколько подходящих табаков показываем ИИ на выбор, и сколько «для баланса» (свежесть, цитрус, ягоды).
+const CANDIDATES = 60;
+const HELPERS = 15;
+const HELPER_GROUPS = ['Освежающий', 'Цитрусовый', 'Ягодный'];
 
 /* ═════════════════════════ Входные точки ═════════════════════════ */
 
@@ -563,7 +479,7 @@ async function crawlMissingBrand(env) {
 
 async function adminIds(env) {
   const cfg = await loadConfig(env);
-  return [...new Set([...(cfg.admins || []), ...String(env.ADMIN_IDS || '').split(',').map((x) => x.trim()).filter(Boolean)])];
+  return [...new Set([...(cfg.settings.admins || []), ...String(env.ADMIN_IDS || '').split(',').map((x) => x.trim()).filter(Boolean)])];
 }
 async function notifyAdmins(env, text) {
   for (const id of await adminIds(env)) await tg(env, 'sendMessage', { chat_id: id, text, disable_web_page_preview: true });
@@ -636,7 +552,7 @@ async function onText(env, msg, ctx) {
     await env.KV.delete('s:' + chat);
     return send(env, chat, (await txt(env, await getLang(env, chat))).restart);
   }
-  // Служебные команды: /id — всем (чтобы узнать свой ID для вкладки «Админы»), остальные — только админам.
+  // Служебные команды: /id — всем (чтобы узнать свой ID для настройки admins), остальные — только админам.
   if (cmd === '/id') return send(env, chat, `Твой Telegram ID: <code>${msg.from && msg.from.id}</code>`);
   if (cmd === '/reload' || cmd === '/config') {
     if (!(await adminIds(env)).includes(String(msg.from && msg.from.id))) return send(env, chat, 'Эта команда только для админов бота.');
@@ -678,14 +594,16 @@ export function configSummary(cfg, env = {}) {
   const at = cfg._at ? new Date(cfg._at).toLocaleString('ru-RU', { timeZone: 'Europe/Moscow', day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) + ' МСК' : 'ещё не загружалась — работают значения из кода';
   const s = cfg.settings;
   const on = cfg.brands.filter((b) => b.on);
+  const yn = (b) => (b ? 'да' : 'нет');
   return '⚙️ <b>Настройки бота</b>\n' +
     `Таблица: ${env.CONFIG_SHEET_ID ? `<a href="https://docs.google.com/spreadsheets/d/${env.CONFIG_SHEET_ID}/edit">открыть</a>` : 'не подключена'}\n` +
-    `Последнее изменение из таблицы: ${at}\n\n` +
+    `Последнее изменение из таблицы: ${at}\n` +
+    `Мозги: ${esc(env.LLM_PROVIDER || 'cloudflare')} · ${esc(env.LLM_MODEL || 'llama-3.3-70b')}\n\n` +
     `Бренды (${on.length}): ${esc(on.map((b) => b.name).join(', '))}\n` +
-    `Правил миксов: ${cfg.rules.length} · акцентных вкусов: ${cfg.accents.length} · поправок крепости: ${cfg.strength.length}\n` +
-    `Чаша: ${s.bowl_grams} г · табаков в миксе: до ${s.max_tobaccos} · средне-крепких при среднем запросе: до ${s.strongish_max}%\n` +
-    `Картинки: ${s.images ? 'да' : 'нет'}${s.images ? (s.image_logo ? ', с SIGMA MIX' : ', без текста') : ''}\n` +
-    `Админов: ${cfg.admins.length + String(env.ADMIN_IDS || '').split(',').filter((x) => x.trim()).length}\n\n` +
+    `Инструкция: ${cfg.instruction.length} абзацев · ограничений: ${cfg.limits.length}\n` +
+    `Чаша ${s.bowl_grams} г · табаков в миксе ${s.min_tobaccos}–${s.max_tobaccos} · доли кратны ${s.share_step}% · без повторов: ${yn(s.no_repeats)}\n` +
+    `Крепкое только по запросу: ${yn(s.strong_only_on_request)} · только из наличия: ${yn(s.only_in_stock)} · картинки: ${yn(s.images)}\n` +
+    `Админов: ${s.admins.length + String(env.ADMIN_IDS || '').split(',').filter((x) => x.trim()).length}\n\n` +
     'Изменения в таблице подтягиваются сами раз в 15 минут, или сразу — командой /reload.';
 }
 
@@ -777,7 +695,9 @@ async function makeMixes(env, chat, session, more = false, lang = 'ru') {
 
 /** Общая картинка: две попытки основной моделью, потом запасная. */
 async function coverImage(env, mixes, cfg) {
-  const prompt = imagePrompt(mixes, cfg.image, cfg.settings.image_logo);
+  // Задание от ИИ берём, если оно полноценное и с логотипом; иначе — запасной шаблон.
+  const own = String(mixes.image || '');
+  const prompt = own.length > 200 && /sigma/i.test(own) ? own + ' ' + IMAGE_SAFETY : imagePrompt(mixes);
   let photo = await makeImage(env, prompt).catch((e) => (console.log('image', e.message), null));
   if (!photo) photo = await makeImage(env, prompt).catch((e) => (console.log('image retry', e.message), null));
   if (!photo && !(env.IMAGE_MODEL || '').includes('flux-1')) {
@@ -789,11 +709,9 @@ async function coverImage(env, mixes, cfg) {
 
 /** Шаг 1. ИИ превращает свободный текст в структуру предпочтений. */
 async function extractPrefs(env, text) {
-  const cfg = await loadConfig(env);
   const catalog = await loadCatalog(env);
   const brands = [...new Set(catalog.map((x) => x.b))];
   const groups = [...new Set(catalog.flatMap((x) => x.g))];
-  const aliases = cfg.brands.filter((b) => b.on && b.aliases).map((b) => `«${b.aliases.split(',').map((x) => x.trim()).filter(Boolean).join('», «')}» → ${b.name}`).join('; ');
   const system =
     'Ты разбираешь запрос клиента кальянного магазина. Верни ТОЛЬКО JSON без пояснений:\n' +
     '{"relevant":true,"like":[],"avoid":[],"groups":[],"flavors":[],"brands":[],"strength":"light|medium|strong|any|unknown"}\n' +
@@ -805,7 +723,7 @@ async function extractPrefs(env, text) {
     '- groups: подходящие направления строго из списка: ' + (groups.join(', ') || 'Фруктовый, Ягодный, Цитрусовый, Освежающий, Десертный') + '.\n' +
     '- flavors: названия конкретных табаков, которые человек упомянул. Если узнаёшь табак — в оригинальном написании ("Creme Brulee", "Epic Mint"), иначе как написал человек.\n' +
     '- brands: бренды, которые человек любит, строго из списка: ' + (brands.join(', ') || '—') + '. ' +
-    'Человек может писать с опечатками, сокращениями, кириллицей или латиницей. Как ещё пишут бренды: ' + (aliases || '—') + '. Сопоставь с ближайшим брендом из списка.\n' +
+    'Человек может писать с опечатками, сокращениями, кириллицей или латиницей («деус», «хулиган», «кракен», «вирджиния») — сопоставь с ближайшим брендом из списка.\n' +
     '- strength: light — курит лёгкое, medium — среднее, strong — крепкое, any — ему всё равно, unknown — не сказал.';
   const out = await llmJson(env, system, text, 400);
   const arr = (v) => (Array.isArray(v) ? v.filter((x) => typeof x === 'string' && x.trim()).map((x) => x.trim()).slice(0, 12) : []);
@@ -825,11 +743,11 @@ export function pickCandidates(catalog, prefs, used = [], more = false, cfg = DE
   const usedSet = new Set(used);
   const jitter = more ? 1.5 : 0.5;
 
-  // Крепкое — только если клиент сам попросил. Иначе убираем крепкие табаки и крепкие линейки (Hard, Strong, Ligero…).
+  // Крепкое — только если клиент сам попросил (настройка strong_only_on_request). Крепкие табаки и линейки (Hard, Strong, Ligero…).
   const okStrength = (it) => {
     const s = it.s, strongLine = isStrongLine(it, st.strong_words);
     if (prefs.strength === 'strong') return !s || s >= 3 || strongLine;
-    if (strongLine || s >= 5) return false;
+    if (st.strong_only_on_request && (strongLine || s >= 5)) return false;
     if (prefs.strength === 'light') return !s || s <= 2;
     if (prefs.strength === 'medium') return !s || s >= 2;
     return true; // «без разницы» / не сказал — всё, кроме крепкого
@@ -857,67 +775,66 @@ export function pickCandidates(catalog, prefs, used = [], more = false, cfg = DE
     scored.push({ it, score, base });
   }
 
-  const main = scored.filter((x) => x.base > 0).sort((a, b) => b.score - a.score).slice(0, st.candidates);
+  const main = scored.filter((x) => x.base > 0).sort((a, b) => b.score - a.score).slice(0, CANDIDATES);
   const chosen = new Set(main.map((x) => x.it.k));
   // «Помощники» для баланса: свежесть, цитрус, кислые ягоды с хорошим рейтингом.
   const helpers = scored
-    .filter((x) => !chosen.has(x.it.k) && x.it.c >= 5 && x.it.g.some((g) => st.helper_groups.includes(g)))
+    .filter((x) => !chosen.has(x.it.k) && x.it.c >= 5 && x.it.g.some((g) => HELPER_GROUPS.includes(g)))
     .sort((a, b) => b.it.r - a.it.r + (b.score - a.score) * 0.1)
-    .slice(0, st.helpers);
+    .slice(0, HELPERS);
   return [...main, ...helpers].map((x) => x.it);
 }
 
-/** Шаг 3. ИИ собирает три микса из кандидатов. Смысловые правила — из таблицы, технический хвост — здесь. */
+/**
+ * Шаг 3. ИИ собирает три микса из кандидатов.
+ * Смысл — из таблицы («Инструкция» + «Ограничения»), технические рамки — из «Настроек», формат ответа — здесь.
+ */
 export function composePrompt(cfg, lang = 'ru') {
   const t = tx(cfg, lang);
-  const st = cfg.settings, sy = cfg.style;
-  const vars = { max_tobaccos: st.max_tobaccos, strongish_max: st.strongish_max };
-  return 'Ты опытный кальянный мастер магазина. Собери 3 микса под запрос клиента ТОЛЬКО из табаков списка.\n' +
-    'Формат строки списка: номер|табак|крепость|рейтинг|вкусы [группы]|пометки.\n' +
-    'Правила:\n' +
-    cfg.rules.map((r) => '- ' + fill(r, vars)).join('\n') + '\n' +
-    '- title — ' + sy.title_rule + '\n' +
-    '- text — ' + sy.text_rule + '\n' +
-    (sy.examples.length ? '  Пиши в стиле этих описаний нашего магазина:\n' + sy.examples.map((e) => '  «' + e + '»').join('\n') + '\n' : '') +
-    sy.extra.map((x) => '  ' + x + '\n').join('') +
-    // ↓ технический хвост: от него зависит, сможет ли бот разобрать ответ. В таблицу не выносится.
-    '- title и text пиши на ' + t.llmLang + ' языке. Названия брендов и табаков в текст не переводи.\n' +
-    '- Доли — целые числа, кратные 5, в сумме ровно 100. Номера табаков — только из списка.\n' +
-    '- Для картинки КАЖДОГО микса у каждого табака добавь "look" НА АНГЛИЙСКОМ: густой глянцевый соус цвета этого вкуса, ' +
-    '3–6 слов, например "glossy deep purple blackberry syrup", "creamy white vanilla cream", "bright orange mango puree".\n' +
-    '- garnish в каждом миксе — НА АНГЛИЙСКОМ свежие ингредиенты этого микса для декора вокруг, 3–5 штук через запятую, например "fresh blackberries, blueberries, lemon wedges, mint leaves". ' +
-    'Только еда и напитки: без людей, кальянов и сигарет.\n' +
-    'Верни ТОЛЬКО JSON: {"mixes":[{"title":"","parts":[{"n":1,"p":50,"look":""}],"text":"","garnish":""}]}';
+  const st = cfg.settings;
+  return cfg.instruction.join('\n') + '\n\n' +
+    (cfg.limits.length ? 'ОБЯЗАТЕЛЬНЫЕ ОГРАНИЧЕНИЯ ОТ КОМАНДЫ — они важнее всего остального:\n' + cfg.limits.map((x) => '- ' + x).join('\n') + '\n\n' : '') +
+    // ↓ технические рамки и формат ответа: от них зависит, сможет ли бот разобрать ответ.
+    'ТЕХНИЧЕСКИЕ ТРЕБОВАНИЯ:\n' +
+    '- Собери ровно 3 микса ТОЛЬКО из табаков списка. Формат строки списка: номер|табак|крепость по htreviews|рейтинг|вкусы [группы].\n' +
+    `- В миксе от ${st.min_tobaccos} до ${st.max_tobaccos} табаков, доли — целые числа, кратные ${st.share_step}, в сумме ровно 100.\n` +
+    (st.no_repeats ? '- Каждый табак — только в одном из трёх миксов.\n' : '') +
+    '- title и text пиши на ' + t.llmLang + ' языке. Названия брендов и табаков не переводи.\n' +
+    '- strength — итоговая крепость микса числом от 1 до 5 (1 лёгкая, 2 средне-лёгкая, 3 средняя, 4 средне-крепкая, 5 крепкая), с учётом инструкции.\n' +
+    '- У каждого табака "look" НА АНГЛИЙСКОМ: густой глянцевый соус цвета этого вкуса, 3–6 слов ("glossy deep purple blackberry syrup").\n' +
+    '- garnish в каждом миксе — НА АНГЛИЙСКОМ свежие ингредиенты этого микса, 3–5 штук через запятую.\n' +
+    '- image — задание для модели рисования НА АНГЛИЙСКОМ, 80–180 слов: одна картинка на все три микса строго по разделу инструкции про картинку, ' +
+    'с конкретными цветами соусов каждого микса (слева направо — микс 1, 2, 3) и ингредиентами. Без людей, кальянов, сигарет и дыма.\n' +
+    'Верни ТОЛЬКО JSON: {"mixes":[{"title":"","parts":[{"n":1,"p":50,"look":""}],"text":"","strength":3,"garnish":""}],"image":""}';
 }
 
 async function composeMixes(env, session, candidates, lang = 'ru', cfg = DEFAULTS) {
-  const lines = candidates.map((it, i) => {
-    const acc = accentMax(it, session.prefs, cfg.accents);
-    return `${i + 1}|${it.b}${it.l && it.l !== 'Основная' ? ' ' + it.l : ''} — ${it.n}${it.a ? ' (' + it.a + ')' : ''}|` +
-      `${STRENGTH_NAME[effStrength(it, cfg.settings.strong_words)] || '?'}|${it.c >= 3 ? it.r : '-'}|${it.t.join(', ')}${it.g.length ? ' [' + it.g.join(', ') + ']' : ''}` +
-      (acc ? `|ТОЛЬКО АКЦЕНТ ≤${acc}%` : '');
-  });
+  const lines = candidates.map((it, i) =>
+    `${i + 1}|${it.b}${it.l && it.l !== 'Основная' ? ' ' + it.l : ''} — ${it.n}${it.a ? ' (' + it.a + ')' : ''}|` +
+    `${STRENGTH_NAME[effStrength(it, cfg.settings.strong_words)] || '?'}|${it.c >= 3 ? it.r : '-'}|${it.t.join(', ')}${it.g.length ? ' [' + it.g.join(', ') + ']' : ''}`);
   const want = { light: 'лёгкая', medium: 'средняя', strong: 'крепкая' }[session.prefs.strength] || 'любая';
   const user =
     'Запрос клиента: ' + session.text + '\n' +
     'Желаемая крепость: ' + want + '\n' +
     (session.titles && session.titles.length ? 'Уже предлагали, не повторяй: ' + session.titles.join('; ') + '\n' : '') +
     '\nТабаки в наличии:\n' + lines.join('\n');
-  const out = await llmJson(env, composePrompt(cfg, lang), user, 1600);
-  const mixes = validateMixes(out, candidates, session.prefs, cfg);
+  const out = await llmJson(env, composePrompt(cfg, lang), user, 2500);
+  const mixes = validateMixes(out, candidates, cfg);
   const common = out && typeof out.garnish === 'string' ? out.garnish.slice(0, 200) : ''; // если ИИ вернул по-старому
   for (const m of mixes) if (!m.garnish) m.garnish = common;
+  mixes.image = out && typeof out.image === 'string' ? out.image.slice(0, 2500) : '';
   return mixes;
 }
 
 /**
- * Проверяем ответ ИИ и правим то, что бесплатная модель часто нарушает:
- * номера существуют, доли = 100, табак не повторяется в разных миксах,
- * акцентные вкусы — не больше своего %, для лёгкого/среднего запроса средне-крепкие — не больше strongish_max %.
- * Крепость микса считается кодом по табакам, а не со слов ИИ.
+ * Проверяем ответ ИИ по «Настройкам» — это гарантирует код, а не модель:
+ * только табаки из списка, от min до max табаков, доли кратны share_step и в сумме 100,
+ * без повторов табаков между миксами (no_repeats).
  */
-export function validateMixes(out, candidates, prefs = null, cfg = DEFAULTS) {
-  const st = cfg.settings;
+export function validateMixes(out, candidates, cfg = DEFAULTS) {
+  if (cfg && !cfg.settings && cfg.strength !== undefined) cfg = DEFAULTS; // старый вызов (prefs вместо cfg)
+  const st = (cfg || DEFAULTS).settings;
+  const step = st.share_step;
   const res = [];
   const usedAll = new Set();
   for (const m of (out && Array.isArray(out.mixes) ? out.mixes : []).slice(0, 3)) {
@@ -927,47 +844,31 @@ export function validateMixes(out, candidates, prefs = null, cfg = DEFAULTS) {
       .filter((p) => p.item && p.p > 0 && !seen.has(p.item.k) && seen.add(p.item.k))
       .sort((a, b) => b.p - a.p)
       .slice(0, st.max_tobaccos);
-    // Табак уже был в предыдущем миксе — убираем повторы, оставляя в миксе минимум 2 табака.
-    const fresh = parts.filter((p) => !usedAll.has(p.item.k));
-    if (fresh.length < parts.length) {
-      const repeats = parts.filter((p) => usedAll.has(p.item.k)).sort((a, b) => b.p - a.p);
-      parts = fresh.length >= 2 ? fresh : [...fresh, ...repeats.slice(0, 2 - fresh.length)];
+    // Табак уже был в предыдущем миксе — убираем повтор, если без него в миксе остаётся минимум табаков.
+    if (st.no_repeats) {
+      const fresh = parts.filter((p) => !usedAll.has(p.item.k));
+      if (fresh.length < parts.length) {
+        const repeats = parts.filter((p) => usedAll.has(p.item.k)).sort((a, b) => b.p - a.p);
+        parts = fresh.length >= st.min_tobaccos ? fresh : [...fresh, ...repeats.slice(0, st.min_tobaccos - fresh.length)];
+      }
     }
-    if (parts.length < 2) continue;
+    if (parts.length < Math.max(2, st.min_tobaccos)) continue;
 
-    // Доли → кратно 5, сумма 100.
+    // Доли → кратно share_step, сумма 100. Остаток — основному табаку.
     const sum = parts.reduce((a, p) => a + p.p, 0);
-    parts = parts.map((p) => ({ item: p.item, look: p.look, p: Math.max(5, Math.round((p.p / sum) * 20) * 5) }));
+    parts = parts.map((p) => ({ item: p.item, look: p.look, p: Math.max(step, Math.round((p.p / sum) * 100 / step) * step) }));
     parts.sort((a, b) => b.p - a.p);
     parts[0].p += 100 - parts.reduce((a, p) => a + p.p, 0);
     if (parts[0].p <= 0) continue;
-
-    // Потолки долей: лишнее отдаём табаку с наибольшей долей, у которого этого ограничения нет.
-    // Сначала акцентные вкусы (важнее), потом средне-крепкие при лёгком/среднем запросе.
-    const strongish = prefs && ['light', 'medium', 'any', 'unknown'].includes(prefs.strength);
-    const limits = [
-      (p) => (prefs && accentMax(p.item, prefs, cfg.accents)) || 100,
-      (p) => (strongish && effStrength(p.item, st.strong_words) >= 4 ? st.strongish_max : 100),
-    ];
-    limits.forEach((capOf, li) => {
-      for (const p of parts) {
-        const cap = capOf(p);
-        if (p.p <= cap) continue;
-        const free = parts
-          .filter((q) => q !== p && capOf(q) >= 100 && limits.slice(0, li).every((prev) => prev(q) >= 100))
-          .sort((a, b) => b.p - a.p)[0];
-        if (!free) continue; // некуда отдать — оставляем как есть
-        free.p += p.p - cap;
-        p.p = cap;
-      }
-    });
     parts.sort((a, b) => b.p - a.p);
     parts.forEach((p) => usedAll.add(p.item.k));
 
+    const sNum = Math.round(Number(m.strength));
     res.push({
       title: String(m.title || 'Микс').slice(0, 60),
       text: String(m.text || '').slice(0, 500),
-      strength: mixStrength(parts, st.strong_words),
+      // Крепость — от ИИ (он знает поправки из инструкции); если не дал — считаем по табакам.
+      strength: sNum >= 1 && sNum <= 5 ? sNum : mixStrength(parts, st.strong_words),
       garnish: typeof m.garnish === 'string' ? m.garnish.slice(0, 200) : '',
       parts,
     });
@@ -981,23 +882,11 @@ export function effStrength(it, words) {
   return isStrongLine(it, words) ? Math.max(s, 5) : s;
 }
 
-/** Итоговая крепость микса 1–5: среднее по долям. */
+/** Запасной расчёт крепости микса 1–5: среднее по долям. */
 export function mixStrength(parts, words) {
   const avg = parts.reduce((a, p) => a + p.p * effStrength(p.item, words), 0) / 100;
   return avg < 1.5 ? 1 : avg < 2.5 ? 2 : avg < 3.5 ? 3 : avg < 4.5 ? 4 : 5;
 }
-
-/** Акцентный вкус, который клиент сам не просил: возвращает максимум %, иначе 0. */
-export function accentMax(it, prefs, accents = DEFAULTS.accents) {
-  const tags = (it.t || []).map(stem);
-  const hit = accents.filter((a) => tags.includes(stem(a.tag)));
-  if (!hit.length) return 0;
-  const wanted = (prefs && prefs.like || []).map(stem);
-  if (hit.some((h) => wanted.includes(stem(h.tag)))) return 0;
-  if (prefs && (prefs.flavors || []).some((f) => similarName(f, it.n) || (it.a && similarName(f, it.a)))) return 0;
-  return Math.min(...hit.map((h) => h.max));
-}
-export const isAggressive = (it, prefs, accents) => accentMax(it, prefs, accents) > 0;
 
 /**
  * Карточка микса:
@@ -1090,10 +979,19 @@ export function parseJson(text) {
 }
 
 /* ═════════════════════════ Картинка ═════════════════════════
- * Стиль — как карточки «SIGMA MIX» на vektorsigma.am/weekly_mix. Части задания — во вкладке «Картинка».
- * Бот сам дописывает цвета соусов каждого микса и ингредиенты.
+ * Обычно задание для картинки пишет ИИ по разделу «КАРТИНКА» из инструкции.
+ * Этот шаблон — запасной, если ИИ задание не вернул. К любому заданию добавляется IMAGE_SAFETY.
  */
-export function imagePrompt(mixes, image = DEFAULTS.image, withLogo = true) {
+const IMAGE_SAFETY = 'The only text in the image is the "SIGMA MIX" logo: no other words, labels, numbers or percentages. No people, no hands, no hookah, no cigarettes, no smoke.';
+const IMAGE_TEMPLATE = {
+  background: 'Square premium advertising poster for flavor mixes, top-down view, light off-white studio background with subtle minimal light-grey geometric decorations: thin outline circles, small solid triangles, plus signs, dashed lines and diagonal hatching',
+  logo: 'At the top center, a modern logo: the word "SIGMA" in thin black sans-serif capitals, directly below it the word "MIX" in heavy bold black sans-serif capitals',
+  layout: 'Below the logo, {count} separate round swirls of the same size arranged in one horizontal row from left to right, evenly spaced',
+  swirl: 'Each swirl is made of thick glossy liquid sauces flowing into each other like a yin-yang, with clear borders between colors, realistic shiny reflections and one small drip at the bottom edge',
+  garnish: 'Fresh ingredients scattered around the edges of the frame, partially cropped',
+  quality: 'High-end commercial food photography, soft natural shadows, vibrant saturated colors, crisp focus, clean balanced composition, lots of white space',
+};
+export function imagePrompt(mixes) {
   if (!Array.isArray(mixes)) mixes = [mixes];
   mixes = mixes.slice(0, 3);
   const n = mixes.length;
@@ -1104,19 +1002,10 @@ export function imagePrompt(mixes, image = DEFAULTS.image, withLogo = true) {
     const sauces = parts.map((p) => p.look || 'a glossy colorful fruit sauce').join(', ');
     return `swirl ${i + 1} (${pos[i]}): ${count[parts.length] || parts.length} sauces — ${sauces}`;
   }).join('; ');
-  // Ингредиенты всех миксов вместе, без повторов, не больше 8.
   const garnish = [...new Set(mixes.flatMap((m) => String(m.garnish || '').split(',').map((g) => g.trim().toLowerCase()).filter(Boolean)))].slice(0, 8).join(', ');
-  const img = { ...DEFAULTS.image, ...image };
-  const dot = (s) => String(s).trim().replace(/[.:;,\s]+$/, '');
-  return [
-    dot(img.background) + '.',
-    dot(withLogo ? img.logo : img.no_text) + '.',
-    dot(fill(img.layout, { count: count[n] || n })) + '.',
-    dot(img.swirl) + ` — ${swirls}.`,
-    garnish ? dot(img.garnish) + `: ${garnish}.` : '',
-    dot(img.quality) + '.',
-    dot(img.bans) + '.',
-  ].filter(Boolean).join(' ');
+  const T = IMAGE_TEMPLATE;
+  return [T.background + '.', T.logo + '.', fill(T.layout, { count: count[n] || n }) + '.', T.swirl + ` — ${swirls}.`,
+    garnish ? T.garnish + `: ${garnish}.` : '', T.quality + '.', IMAGE_SAFETY].filter(Boolean).join(' ');
 }
 
 /** Кириллицу — латиницей: модель рисования не умеет русские буквы. */
@@ -1156,19 +1045,12 @@ let catCache = { at: 0, sig: '', items: [] };
 async function loadCatalog(env) {
   const cfg = await loadConfig(env);
   const brands = cfg.brands.filter((b) => b.on).map((b) => b.code);
-  const sig = JSON.stringify([brands, cfg.strength]);
+  const sig = JSON.stringify([brands, cfg.settings.only_in_stock]);
   if (catCache.items.length && catCache.sig === sig && Date.now() - catCache.at < 10 * 60 * 1000) return catCache.items;
   const parts = await Promise.all(brands.map((b) => env.KV.get('cat:' + b, 'json')));
   let items = parts.flatMap((p) => (p && p.items) || []);
-  // Поправки крепости из вкладки «Крепость»: бренд или бренд/линейка не слабее указанного.
-  if (cfg.strength.length) {
-    items = items.map((it) => {
-      const f = cfg.strength.filter(({ key }) => it.k === key || it.k.startsWith(key.replace(/\/$/, '') + '/'));
-      return f.length ? { ...it, s: Math.max(it.s || 0, ...f.map((x) => x.s)) } : it;
-    });
-  }
   // Наличие: когда появится выгрузка склада, в KV кладётся ключ stock — список ключей табаков.
-  const stock = await env.KV.get('stock', 'json');
+  const stock = cfg.settings.only_in_stock ? await env.KV.get('stock', 'json') : null;
   if (Array.isArray(stock) && stock.length) {
     const set = new Set(stock);
     items = items.filter((x) => set.has(x.k));
