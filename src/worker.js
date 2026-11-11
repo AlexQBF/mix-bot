@@ -94,6 +94,8 @@ const MAIN_TEXT_KEYS = ['hello', 'choose_lang', 'lang_set', 'ask_strength', 'btn
 
 // Настройки: то, что код гарантирует сам, независимо от ИИ. Видно и меняется в таблице.
 export const DEFAULT_SETTINGS = [
+  { key: 'brains', def: 'платные', type: 'choice', options: { 'платные': ['платные', 'платно', 'paid', 'да'], 'бесплатные': ['бесплатные', 'бесплатно', 'free', 'нет'] },
+    desc: 'Какие мозги работают: «платные» — Claude + картинки ChatGPT (модели и ключи — в wrangler.toml), «бесплатные» — Cloudflare: Llama и FLUX, как было раньше.' },
   { key: 'bowl_grams', def: '20', type: 'int', min: 5, max: 60, desc: 'Сколько грамм в чаше. Граммы каждого табака = его доля × чаша.' },
   { key: 'min_tobaccos', def: '2', type: 'int', min: 2, max: 6, desc: 'Минимум табаков в одном миксе.' },
   { key: 'max_tobaccos', def: '4', type: 'int', min: 2, max: 6, desc: 'Максимум табаков в одном миксе.' },
@@ -249,6 +251,12 @@ function parseSetting(def, raw) {
     return { error: `должно быть «да» или «нет», а стоит «${v}»` };
   }
   if (def.type === 'list') return { value: v.split(',').map((x) => x.trim()).filter(Boolean) };
+  if (def.type === 'choice') {
+    const low = v.toLowerCase();
+    const hit = Object.entries(def.options).find(([, words]) => words.includes(low));
+    if (!hit) return { error: `должно быть одно из: ${Object.keys(def.options).map((x) => '«' + x + '»').join(', ')}, а стоит «${v}»` };
+    return { value: hit[0] };
+  }
   if (def.type === 'ids') {
     const ids = v.split(/[,;\s]+/).map((x) => x.trim()).filter(Boolean);
     const bad = ids.find((x) => !/^\d{4,15}$/.test(x));
@@ -458,6 +466,15 @@ const PAGE = 20; // сайт сам грузит по 20, большие пор�
 const STRENGTH = { 'лёгкая': 1, 'легкая': 1, 'средне-лёгкая': 2, 'средне-легкая': 2, 'средняя': 3, 'средне-крепкая': 4, 'крепкая': 5 };
 const STRENGTH_NAME = ['', 'лёгкая', 'средне-лёгкая', 'средняя', 'средне-крепкая', 'крепкая'];
 const CRON_CONFIG = '*/15 * * * *';
+// Бесплатные мозги Cloudflare — для настройки brains = «бесплатные» и как запасной вариант, если платный ИИ не ответил.
+const FREE_LLM = '@cf/meta/llama-3.3-70b-instruct-fp8-fast';
+const FREE_IMAGE = '@cf/black-forest-labs/flux-2-klein-4b';
+
+/** Мозги с учётом настройки brains из таблицы: «бесплатные» — всё на Cloudflare, «платные» — как в wrangler.toml. */
+export function applyBrains(env, cfg) {
+  if (!cfg || !cfg.settings || cfg.settings.brains !== 'бесплатные') return env;
+  return { ...env, LLM_PROVIDER: 'cloudflare', LLM_MODEL: FREE_LLM, LLM_MODEL_FAST: '', IMAGE_PROVIDER: 'cloudflare', IMAGE_MODEL: FREE_IMAGE };
+}
 // Сколько подходящих табаков показываем ИИ на выбор, и сколько «для баланса» (свежесть, цитрус, ягоды).
 const CANDIDATES = 60;
 const HELPERS = 15;
@@ -630,15 +647,17 @@ async function onText(env, msg, ctx) {
 export function configSummary(cfg, env = {}) {
   const at = cfg._at ? new Date(cfg._at).toLocaleString('ru-RU', { timeZone: 'Europe/Moscow', day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) + ' МСК' : 'ещё не загружалась — работают значения из кода';
   const s = cfg.settings;
+  const e = applyBrains(env, cfg);
   const on = cfg.brands.filter((b) => b.on);
   const yn = (b) => (b ? 'да' : 'нет');
   return '⚙️ <b>Настройки бота</b>\n' +
     `Таблица: ${env.CONFIG_SHEET_ID ? `<a href="https://docs.google.com/spreadsheets/d/${env.CONFIG_SHEET_ID}/edit">открыть</a>` : 'не подключена'}\n` +
     `Последнее изменение из таблицы: ${at}\n` +
-    `Мозги: ${esc(env.LLM_PROVIDER || 'cloudflare')} · ${esc(env.LLM_MODEL || 'llama-3.3-70b')}` +
-    (env.LLM_MODEL_FAST ? ` (разбор запроса — ${esc(env.LLM_MODEL_FAST)})` : '') + '\n' +
-    `Картинки: ${esc(env.IMAGE_PROVIDER || 'cloudflare')} · ${esc(env.IMAGE_MODEL || 'flux-2-klein-4b')}` +
-    (env.IMAGE_PROVIDER === 'openai' ? ` · качество ${esc(env.IMAGE_QUALITY || 'medium')}` : '') + '\n\n' +
+    `Режим мозгов (brains): <b>${esc(s.brains)}</b>\n` +
+    `Мозги: ${esc(e.LLM_PROVIDER || 'cloudflare')} · ${esc(e.LLM_MODEL || 'llama-3.3-70b')}` +
+    (e.LLM_MODEL_FAST ? ` (разбор запроса — ${esc(e.LLM_MODEL_FAST)})` : '') + '\n' +
+    `Картинки: ${esc(e.IMAGE_PROVIDER || 'cloudflare')} · ${esc(e.IMAGE_MODEL || 'flux-2-klein-4b')}` +
+    (e.IMAGE_PROVIDER === 'openai' ? ` · качество ${esc(e.IMAGE_QUALITY || 'medium')}` : '') + '\n\n' +
     `Бренды (${on.length}): ${esc(on.map((b) => b.name).join(', '))}\n` +
     `Инструкция: ${cfg.instruction.filter(isSectionTitle).length} разделов, ${cfg.instruction.join(' ').length} знаков · ` +
     `разбор запроса: ${splitInstruction(cfg.instruction).parseFromTable ? 'из таблицы' : 'текст из кода'} · ограничений: ${cfg.limits.length}\n` +
@@ -699,6 +718,7 @@ function resultKeyboard(t) {
 
 async function makeMixes(env, chat, session, more = false, lang = 'ru') {
   const cfg = await loadConfig(env);
+  env = applyBrains(env, cfg);
   const t = tx(cfg, lang);
   const catalog = await loadCatalog(env);
   if (!catalog.length) return send(env, chat, t.noCatalog);
@@ -739,8 +759,14 @@ async function coverImage(env, mixes, cfg) {
   // Задание от ИИ берём, если оно полноценное и с логотипом; иначе — запасной шаблон.
   const own = String(mixes.image || '');
   const prompt = own.length > 200 && /sigma/i.test(own) ? own + ' ' + IMAGE_SAFETY : imagePrompt(mixes);
-  let photo = await makeImage(env, prompt).catch((e) => (console.log('image', e.message), null));
-  if (!photo) photo = await makeImage(env, prompt).catch((e) => (console.log('image retry', e.message), null));
+  let lastErr = '';
+  const attempt = (e2) => makeImage(e2, prompt).catch((e) => (console.log('image', e.message), lastErr = e.message, null));
+  let photo = await attempt(env);
+  if (!photo) photo = await attempt(env);
+  if (!photo && lastErr) {
+    await reportProblem(env, 'image', `⚠️ Картинка не получилась (${env.IMAGE_PROVIDER || 'cloudflare'} · ${env.IMAGE_MODEL || 'flux'}):\n${lastErr}` +
+      (env.IMAGE_PROVIDER === 'openai' ? '\nРисую запасную на Cloudflare.' : ''));
+  }
   if (!photo) {
     // Запасной вариант — бесплатно на Cloudflare: FLUX.2, если основная — OpenAI; иначе FLUX.1 (проще).
     const fallback = env.IMAGE_PROVIDER === 'openai' ? '@cf/black-forest-labs/flux-2-klein-4b'
@@ -754,6 +780,7 @@ async function coverImage(env, mixes, cfg) {
 /** Шаг 1. ИИ превращает свободный текст в структуру предпочтений. */
 async function extractPrefs(env, text) {
   const cfg = await loadConfig(env);
+  env = applyBrains(env, cfg);
   const catalog = await loadCatalog(env);
   const system = parsePrompt(cfg, catalog);
   // Разбор — простая задача: можно отдать быстрой дешёвой модели (LLM_MODEL_FAST), сборку — умной (LLM_MODEL).
@@ -867,8 +894,11 @@ async function composeMixes(env, session, candidates, lang = 'ru', cfg = DEFAULT
     'Желаемая крепость: ' + want + '\n' +
     (session.titles && session.titles.length ? 'Уже предлагали, не повторяй: ' + session.titles.join('; ') + '\n' : '') +
     '\nТабаки в наличии:\n' + lines.join('\n');
-  const out = await llmJson(env, composePrompt(cfg, lang), user, 2500);
+  const out = await llmJson(env, composePrompt(cfg, lang), user, 4000);
   const mixes = validateMixes(out, candidates, cfg);
+  if (out && !mixes.length) {
+    await reportProblem(env, 'nomix', '⚠️ ИИ ответил, но ни один микс не прошёл проверку (номера табаков, доли). Начало ответа:\n' + JSON.stringify(out).slice(0, 600));
+  }
   const common = out && typeof out.garnish === 'string' ? out.garnish.slice(0, 200) : ''; // если ИИ вернул по-старому
   for (const m of mixes) if (!m.garnish) m.garnish = common;
   mixes.image = out && typeof out.image === 'string' ? out.image.slice(0, 2500) : '';
@@ -991,9 +1021,11 @@ async function llm(env, system, user, maxTokens) {
       headers: { 'x-api-key': env.LLM_API_KEY, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' },
       body: JSON.stringify({ model, max_tokens: maxTokens, system, messages: [{ role: 'user', content: user }] }),
     });
-    const j = await r.json();
-    if (!r.ok) throw new Error('anthropic ' + r.status + ' ' + JSON.stringify(j).slice(0, 200));
-    return (j.content || []).map((b) => b.text || '').join('');
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error('anthropic ' + r.status + ' ' + JSON.stringify(j).slice(0, 400));
+    const out = (j.content || []).filter((b) => b.type === 'text').map((b) => b.text || '').join('');
+    if (!out) throw new Error('anthropic: пустой ответ, stop_reason=' + j.stop_reason);
+    return out;
   }
   if (provider === 'openai') {
     const base = (env.LLM_BASE_URL || 'https://api.openai.com/v1').replace(/\/$/, '');
@@ -1010,12 +1042,41 @@ async function llm(env, system, user, maxTokens) {
 }
 
 async function llmJson(env, system, user, maxTokens) {
+  const who = `${env.LLM_PROVIDER || 'cloudflare'} · ${env.LLM_MODEL || 'llama'}`;
+  let text;
   try {
-    return parseJson(await llm(env, system, user, maxTokens));
+    text = await llm(env, system, user, maxTokens);
   } catch (e) {
     console.log('llm', e.message);
-    return null;
+    const canFallback = (env.LLM_PROVIDER || 'cloudflare') !== 'cloudflare' && env.AI;
+    await reportProblem(env, 'llm', `⚠️ ИИ не ответил (${who}):\n${e.message}` +
+      (canFallback ? '\nПока отвечает бесплатная модель Cloudflare — клиенты миксы получают.' : ''));
+    if (!canFallback) return null;
+    try {
+      text = await llm({ ...env, LLM_PROVIDER: 'cloudflare', LLM_MODEL: FREE_LLM }, system, user, maxTokens);
+    } catch (e2) {
+      console.log('llm fallback', e2.message);
+      return null;
+    }
   }
+  const json = parseJson(text);
+  if (!json) {
+    console.log('llm bad json', String(text).slice(0, 500));
+    await reportProblem(env, 'llmjson', `⚠️ ИИ ответил не в том формате (${who}). Начало ответа:\n${String(text).slice(0, 400)}`);
+  }
+  return json;
+}
+
+/**
+ * Сообщить админам о сбое — с точной причиной, но не чаще раза в 10 минут на один вид проблемы,
+ * чтобы не заспамить, если сломалось надолго.
+ */
+async function reportProblem(env, kind, text) {
+  try {
+    if (await env.KV.get('problem:' + kind)) return;
+    await env.KV.put('problem:' + kind, '1', { expirationTtl: 600 });
+    await notifyAdmins(env, text.slice(0, 3500));
+  } catch (e) { console.log('reportProblem', e.message); }
 }
 
 /** Модели любят обернуть JSON в текст или ```json — достаём сам объект. */
