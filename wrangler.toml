@@ -28,6 +28,11 @@ id = "feb60298be7e4467a50ee0c889bafdc6"
 # редактировать — только приглашённым.
 CONFIG_SHEET_ID = "1iRdMg7O_PXx5F8KR-CfUTeQE9tgrafuypsZxG6MHz_4"
 
+# Скрипт Google, подключённый к таблице (Расширения → Apps Script): пишет журнал во вкладку «Журнал»
+# и отдаёт боту настройки — тогда таблицу можно закрыть от посторонних. Пусто — журнала нет, настройки читаются по ссылке.
+# Секрет к нему — SHEET_SECRET в Cloudflare (тот же, что константа SECRET в скрипте).
+SHEET_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbxUzkkxg1DCU-rGxuuSGd37haRnnMhg3M9DX-OUt3WR55t67ztO0mCaEy2PzOCSd_H_/exec"
+
 # Запасной список админов (Telegram ID через запятую) — на случай, если admins во вкладке «Настройки» пустой.
 # Свой ID можно узнать командой /id у бота.
 ADMIN_IDS = ""
@@ -60,3 +65,4 @@ IMAGE_QUALITY = "medium"
 #   WEBHOOK_SECRET  — случайная строка (латиница и цифры)
 #   LLM_API_KEY     — только если LLM_PROVIDER не cloudflare (для Claude — ключ Anthropic)
 #   IMAGE_API_KEY   — только если IMAGE_PROVIDER = "openai" (ключ OpenAI)
+#   SHEET_SECRET    — секрет скрипта Google (журнал и чтение закрытой таблицы)
