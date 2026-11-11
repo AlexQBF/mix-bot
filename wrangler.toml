@@ -12,6 +12,10 @@ crons = ["*/15 * * * *", "*/10 3-7 * * 1"]
 [ai]
 binding = "AI"
 
+# Логи в Cloudflare (Workers & Pages → mix-bot → Logs): видно ошибки, даже если в тот момент никто не смотрел.
+[observability]
+enabled = true
+
 # Хранилище: справочник табаков, копия настроек из таблицы, диалоги.
 # Хранилище mix-bot в Cloudflare (Storage & Databases → KV).
 [[kv_namespaces]]
