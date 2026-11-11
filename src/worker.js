@@ -117,7 +117,7 @@ export const DEFAULT_BRANDS = [
   { code: 'morpheus', name: 'Morpheus', on: true },
 ];
 
-// Инструкция для ИИ — обычным языком, строка = абзац. Заголовки разделов — просто для удобства чтения.
+// Инструкция для ИИ — обычным языком. В таблице: одна ячейка = один раздел (заголовок БОЛЬШИМИ БУКВАМИ + текст).
 export const DEFAULT_INSTRUCTION = [
   'КТО ТЫ',
   'Ты — опытный кальянный мастер магазина VektorSIGMA. Подбираешь клиенту 3 микса из табаков, которые есть у нас.',
@@ -138,6 +138,13 @@ export const DEFAULT_INSTRUCTION = [
   'Сверху по центру логотип: слово SIGMA тонкими чёрными буквами, под ним MIX жирными чёрными буквами. Больше никакого текста, цифр и процентов на картинке.',
   'Под логотипом в один ряд три круга одинакового размера — микс 1, 2, 3 слева направо. Каждый круг — густые глянцевые соусы цвета вкусов микса, перетекающие друг в друга как инь-ян, с капелькой снизу.',
   'По краям кадра свежие ингредиенты миксов, частично обрезанные краем. Сочные цвета, мягкие тени, много воздуха. Без людей, рук, кальянов, сигарет и дыма.',
+  // Этот раздел идёт не миксологу, а на первый шаг — разбор сообщения клиента. Бот находит его по названию.
+  'РАЗБОР ЗАПРОСА',
+  'Это первый шаг, ещё до миксов: из сообщения клиента нужно понять, что ему подбирать. Клиент пишет в Telegram своими словами — по-русски или по-армянски, с опечатками и сокращениями, кириллицей или латиницей («деус», «хулиган», «кракен», «вирджиния»).',
+  'Вытащи из сообщения: какие вкусы он хочет, каких не хочет, какие конкретные табаки и бренды назвал и как крепко курит.',
+  'Если клиент назвал только настроение или направление («что-то свежее», «как десерт», «летнее») — подбери 3–6 вкусов, которые этому соответствуют.',
+  'Крепость понимай по смыслу: «курю средне», «покрепче», «чтобы не давило», «я новичок» — это тоже ответ про крепость. Если про крепость ничего нет — так и отметь, бот сам спросит.',
+  'Если сообщение вообще не про кальян, табак или вкусы — отметь, что запрос не по теме.',
 ];
 
 // Ограничения — то, что менеджер заметил на проверке. Модель считает их главнее инструкции.
@@ -166,11 +173,37 @@ export const SHEET_TABS = [
 ];
 const SECTION_NAMES = { instruction: 'инструкция', limits: 'ограничения', settings: 'настройки', brands: 'бренды', texts: 'тексты бота' };
 
+/** Инструкция по разделам для таблицы: одна ячейка = заголовок БОЛЬШИМИ БУКВАМИ + текст раздела. */
+export function instructionSections(lines) {
+  const out = [];
+  for (const x of lines) {
+    if (isSectionTitle(x) || !out.length) out.push([x]);
+    else out[out.length - 1].push(x);
+  }
+  return out.map((s) => s.join('\n'));
+}
+const isSectionTitle = (x) => x.length < 40 && x === x.toUpperCase() && /[A-ZА-ЯЁ]/.test(x);
+const isParseTitle = (x) => isSectionTitle(x) && /^РАЗБОР ЗАПРОС/i.test(x.trim());
+
+/**
+ * Делим инструкцию: раздел «РАЗБОР ЗАПРОСА» — для первого шага (понять сообщение клиента),
+ * всё остальное — миксологу. Нет такого раздела в таблице — для разбора берём текст из кода.
+ */
+export function splitInstruction(lines) {
+  const parse = [], mix = [];
+  let inParse = false;
+  for (const x of lines) {
+    if (isSectionTitle(x)) inParse = isParseTitle(x);
+    (inParse ? parse : mix).push(x);
+  }
+  return { parse: parse.length > 1 ? parse : splitInstruction(DEFAULT_INSTRUCTION).parse, parseFromTable: parse.length > 1, mix };
+}
+
 /** Содержимое таблицы по умолчанию (вкладка → строки с заголовком). Из него заполнена Google Таблица. */
 export function sheetRows() {
   const H = Object.fromEntries(SHEET_TABS.map((t) => [t.name, t.head]));
   return {
-    'Инструкция': [H['Инструкция'], ...DEFAULT_INSTRUCTION.map((x) => [x])],
+    'Инструкция': [H['Инструкция'], ...instructionSections(DEFAULT_INSTRUCTION).map((x) => [x])],
     'Ограничения': [H['Ограничения'], ...DEFAULT_LIMITS.map((l) => [l.text, l.who, l.when])],
     'Настройки': [H['Настройки'], ...DEFAULT_SETTINGS.map((s) => [s.key, s.def, s.desc])],
     'Бренды': [H['Бренды'], ...DEFAULT_BRANDS.map((b) => [b.code, b.name, b.on ? 'да' : 'нет'])],
@@ -247,8 +280,10 @@ export function buildConfig(tabs) {
   // Инструкция: просто строки текста
   const ins = body('Инструкция');
   if (ins) {
-    cfg.instruction = ins.map((r) => r.c[0]).filter(Boolean);
+    // Ячейка = раздел. Но можно и всё одной ячейкой, и по абзацу в строке — бот склеит и разобьёт сам.
+    cfg.instruction = ins.flatMap((r) => r.c[0].split(/\r?\n/)).map((x) => x.trim()).filter(Boolean);
     if (cfg.instruction.join(' ').length < 50) errors.push('Инструкция: почти пустая — так ИИ не поймёт, как собирать миксы');
+    else if (!splitInstruction(cfg.instruction).parseFromTable) warnings.push('Инструкция: нет раздела «РАЗБОР ЗАПРОСА» — сообщения клиентов разбираю по тексту из кода');
   }
 
   // Ограничения: строки текста (кто и когда — для людей)
@@ -600,7 +635,8 @@ export function configSummary(cfg, env = {}) {
     `Последнее изменение из таблицы: ${at}\n` +
     `Мозги: ${esc(env.LLM_PROVIDER || 'cloudflare')} · ${esc(env.LLM_MODEL || 'llama-3.3-70b')}\n\n` +
     `Бренды (${on.length}): ${esc(on.map((b) => b.name).join(', '))}\n` +
-    `Инструкция: ${cfg.instruction.length} абзацев · ограничений: ${cfg.limits.length}\n` +
+    `Инструкция: ${cfg.instruction.filter(isSectionTitle).length} разделов, ${cfg.instruction.join(' ').length} знаков · ` +
+    `разбор запроса: ${splitInstruction(cfg.instruction).parseFromTable ? 'из таблицы' : 'текст из кода'} · ограничений: ${cfg.limits.length}\n` +
     `Чаша ${s.bowl_grams} г · табаков в миксе ${s.min_tobaccos}–${s.max_tobaccos} · доли кратны ${s.share_step}% · без повторов: ${yn(s.no_repeats)}\n` +
     `Крепкое только по запросу: ${yn(s.strong_only_on_request)} · только из наличия: ${yn(s.only_in_stock)} · картинки: ${yn(s.images)}\n` +
     `Админов: ${s.admins.length + String(env.ADMIN_IDS || '').split(',').filter((x) => x.trim()).length}\n\n` +
@@ -709,22 +745,9 @@ async function coverImage(env, mixes, cfg) {
 
 /** Шаг 1. ИИ превращает свободный текст в структуру предпочтений. */
 async function extractPrefs(env, text) {
+  const cfg = await loadConfig(env);
   const catalog = await loadCatalog(env);
-  const brands = [...new Set(catalog.map((x) => x.b))];
-  const groups = [...new Set(catalog.flatMap((x) => x.g))];
-  const system =
-    'Ты разбираешь запрос клиента кальянного магазина. Верни ТОЛЬКО JSON без пояснений:\n' +
-    '{"relevant":true,"like":[],"avoid":[],"groups":[],"flavors":[],"brands":[],"strength":"light|medium|strong|any|unknown"}\n' +
-    'Клиент может писать по-русски или по-армянски. Поля like и avoid ВСЕГДА заполняй по-русски, переводя с армянского.\n' +
-    '- relevant: false, если сообщение вообще не про кальян, табак или вкусы.\n' +
-    '- like: вкусы, которые человек хочет, по одному слову в именительном падеже ("Малина", "Лайм", "Мята").\n' +
-    '  Если назвал только настроение ("свежее", "десертное") — подбери 3–6 подходящих вкусов сам.\n' +
-    '- avoid: вкусы, которых человек не хочет, в том же виде.\n' +
-    '- groups: подходящие направления строго из списка: ' + (groups.join(', ') || 'Фруктовый, Ягодный, Цитрусовый, Освежающий, Десертный') + '.\n' +
-    '- flavors: названия конкретных табаков, которые человек упомянул. Если узнаёшь табак — в оригинальном написании ("Creme Brulee", "Epic Mint"), иначе как написал человек.\n' +
-    '- brands: бренды, которые человек любит, строго из списка: ' + (brands.join(', ') || '—') + '. ' +
-    'Человек может писать с опечатками, сокращениями, кириллицей или латиницей («деус», «хулиган», «кракен», «вирджиния») — сопоставь с ближайшим брендом из списка.\n' +
-    '- strength: light — курит лёгкое, medium — среднее, strong — крепкое, any — ему всё равно, unknown — не сказал.';
+  const system = parsePrompt(cfg, catalog);
   const out = await llmJson(env, system, text, 400);
   const arr = (v) => (Array.isArray(v) ? v.filter((x) => typeof x === 'string' && x.trim()).map((x) => x.trim()).slice(0, 12) : []);
   const strength = ['light', 'medium', 'strong', 'any', 'unknown'].includes(out && out.strength) ? out.strength : 'unknown';
@@ -733,6 +756,22 @@ async function extractPrefs(env, text) {
     like: arr(out && out.like), avoid: arr(out && out.avoid), groups: arr(out && out.groups),
     flavors: arr(out && out.flavors), brands: arr(out && out.brands), strength,
   };
+}
+
+/** Задание для шага 1: раздел «РАЗБОР ЗАПРОСА» из таблицы + формат ответа (он в коде — от него зависит, поймёт ли бот ответ). */
+export function parsePrompt(cfg, catalog = []) {
+  const brands = [...new Set(catalog.map((x) => x.b))];
+  const groups = [...new Set(catalog.flatMap((x) => x.g))];
+  return splitInstruction(cfg.instruction).parse.join('\n') + '\n\n' +
+    'ТЕХНИЧЕСКИЕ ТРЕБОВАНИЯ:\n' +
+    'Верни ТОЛЬКО JSON без пояснений:\n' +
+    '{"relevant":true,"like":[],"avoid":[],"groups":[],"flavors":[],"brands":[],"strength":"light|medium|strong|any|unknown"}\n' +
+    '- relevant: false, если сообщение не по теме.\n' +
+    '- like — вкусы, которые клиент хочет, avoid — которых не хочет: по одному слову в именительном падеже ("Малина", "Лайм", "Мята"), ВСЕГДА по-русски (с армянского переводи).\n' +
+    '- groups: подходящие направления строго из списка: ' + (groups.join(', ') || 'Фруктовый, Ягодный, Цитрусовый, Освежающий, Десертный') + '.\n' +
+    '- flavors: конкретные табаки, которые клиент назвал. Если узнаёшь табак — в оригинальном написании ("Creme Brulee", "Epic Mint"), иначе как написал клиент.\n' +
+    '- brands: бренды, которые клиент любит, строго из списка: ' + (brands.join(', ') || '—') + '. Написание клиента сопоставь с ближайшим брендом из списка.\n' +
+    '- strength: light — курит лёгкое, medium — среднее, strong — крепкое, any — всё равно, unknown — не сказал.';
 }
 
 /** Шаг 2. Код отбирает из справочника кандидатов под предпочтения. */
@@ -792,7 +831,7 @@ export function pickCandidates(catalog, prefs, used = [], more = false, cfg = DE
 export function composePrompt(cfg, lang = 'ru') {
   const t = tx(cfg, lang);
   const st = cfg.settings;
-  return cfg.instruction.join('\n') + '\n\n' +
+  return splitInstruction(cfg.instruction).mix.join('\n') + '\n\n' +
     (cfg.limits.length ? 'ОБЯЗАТЕЛЬНЫЕ ОГРАНИЧЕНИЯ ОТ КОМАНДЫ — они важнее всего остального:\n' + cfg.limits.map((x) => '- ' + x).join('\n') + '\n\n' : '') +
     // ↓ технические рамки и формат ответа: от них зависит, сможет ли бот разобрать ответ.
     'ТЕХНИЧЕСКИЕ ТРЕБОВАНИЯ:\n' +
