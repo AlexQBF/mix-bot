@@ -15,7 +15,9 @@
  *
  * Секреты:  BOT_TOKEN, WEBHOOK_SECRET, LLM_API_KEY (для Claude и других платных мозгов)
  * Биндинги: KV (хранилище), AI (Workers AI)
- * wrangler.toml [vars]: CONFIG_SHEET_ID, ADMIN_IDS, LLM_PROVIDER, LLM_MODEL, LLM_BASE_URL, IMAGE_MODEL
+ * wrangler.toml [vars]: CONFIG_SHEET_ID, ADMIN_IDS, LLM_PROVIDER, LLM_MODEL, LLM_MODEL_FAST, LLM_BASE_URL,
+ *                      IMAGE_PROVIDER, IMAGE_MODEL, IMAGE_QUALITY
+ * Секреты: BOT_TOKEN, WEBHOOK_SECRET, LLM_API_KEY (платный ИИ), IMAGE_API_KEY (картинки OpenAI)
  */
 
 /* ═════════════════════════ Значения по умолчанию ═════════════════════════
@@ -140,8 +142,8 @@ export const DEFAULT_INSTRUCTION = [
   'По краям кадра свежие ингредиенты миксов, частично обрезанные краем. Сочные цвета, мягкие тени, много воздуха. Без людей, рук, кальянов, сигарет и дыма.',
   // Этот раздел идёт не миксологу, а на первый шаг — разбор сообщения клиента. Бот находит его по названию.
   'РАЗБОР ЗАПРОСА',
-  'Это первый шаг, ещё до миксов: из сообщения клиента нужно понять, что ему подбирать. Клиент пишет в Telegram своими словами — по-русски или по-армянски, с опечатками и сокращениями, кириллицей или латиницей («деус», «хулиган», «кракен», «вирджиния»).',
-  'Вытащи из сообщения: какие вкусы он хочет, каких не хочет, какие конкретные табаки и бренды назвал и как крепко курит.',
+  'Клиент пишет боту в Telegram своими словами — по-русски или по-армянски, с опечатками и сокращениями, кириллицей или латиницей («деус», «хулиган», «кракен», «вирджиния»).',
+  'Пойми из его сообщения: какие вкусы он хочет, каких не хочет, какие конкретные табаки и бренды назвал и как крепко курит.',
   'Если клиент назвал только настроение или направление («что-то свежее», «как десерт», «летнее») — подбери 3–6 вкусов, которые этому соответствуют.',
   'Крепость понимай по смыслу: «курю средне», «покрепче», «чтобы не давило», «я новичок» — это тоже ответ про крепость. Если про крепость ничего нет — так и отметь, бот сам спросит.',
   'Если сообщение вообще не про кальян, табак или вкусы — отметь, что запрос не по теме.',
@@ -633,7 +635,10 @@ export function configSummary(cfg, env = {}) {
   return '⚙️ <b>Настройки бота</b>\n' +
     `Таблица: ${env.CONFIG_SHEET_ID ? `<a href="https://docs.google.com/spreadsheets/d/${env.CONFIG_SHEET_ID}/edit">открыть</a>` : 'не подключена'}\n` +
     `Последнее изменение из таблицы: ${at}\n` +
-    `Мозги: ${esc(env.LLM_PROVIDER || 'cloudflare')} · ${esc(env.LLM_MODEL || 'llama-3.3-70b')}\n\n` +
+    `Мозги: ${esc(env.LLM_PROVIDER || 'cloudflare')} · ${esc(env.LLM_MODEL || 'llama-3.3-70b')}` +
+    (env.LLM_MODEL_FAST ? ` (разбор запроса — ${esc(env.LLM_MODEL_FAST)})` : '') + '\n' +
+    `Картинки: ${esc(env.IMAGE_PROVIDER || 'cloudflare')} · ${esc(env.IMAGE_MODEL || 'flux-2-klein-4b')}` +
+    (env.IMAGE_PROVIDER === 'openai' ? ` · качество ${esc(env.IMAGE_QUALITY || 'medium')}` : '') + '\n\n' +
     `Бренды (${on.length}): ${esc(on.map((b) => b.name).join(', '))}\n` +
     `Инструкция: ${cfg.instruction.filter(isSectionTitle).length} разделов, ${cfg.instruction.join(' ').length} знаков · ` +
     `разбор запроса: ${splitInstruction(cfg.instruction).parseFromTable ? 'из таблицы' : 'текст из кода'} · ограничений: ${cfg.limits.length}\n` +
@@ -736,8 +741,11 @@ async function coverImage(env, mixes, cfg) {
   const prompt = own.length > 200 && /sigma/i.test(own) ? own + ' ' + IMAGE_SAFETY : imagePrompt(mixes);
   let photo = await makeImage(env, prompt).catch((e) => (console.log('image', e.message), null));
   if (!photo) photo = await makeImage(env, prompt).catch((e) => (console.log('image retry', e.message), null));
-  if (!photo && !(env.IMAGE_MODEL || '').includes('flux-1')) {
-    photo = await makeImage({ ...env, IMAGE_MODEL: '@cf/black-forest-labs/flux-1-schnell' }, prompt)
+  if (!photo) {
+    // Запасной вариант — бесплатно на Cloudflare: FLUX.2, если основная — OpenAI; иначе FLUX.1 (проще).
+    const fallback = env.IMAGE_PROVIDER === 'openai' ? '@cf/black-forest-labs/flux-2-klein-4b'
+      : (env.IMAGE_MODEL || '').includes('flux-1') ? null : '@cf/black-forest-labs/flux-1-schnell';
+    if (fallback) photo = await makeImage({ ...env, IMAGE_PROVIDER: 'cloudflare', IMAGE_MODEL: fallback }, prompt)
       .catch((e) => (console.log('image fallback', e.message), null));
   }
   return photo;
@@ -748,7 +756,9 @@ async function extractPrefs(env, text) {
   const cfg = await loadConfig(env);
   const catalog = await loadCatalog(env);
   const system = parsePrompt(cfg, catalog);
-  const out = await llmJson(env, system, text, 400);
+  // Разбор — простая задача: можно отдать быстрой дешёвой модели (LLM_MODEL_FAST), сборку — умной (LLM_MODEL).
+  const fastEnv = env.LLM_MODEL_FAST ? { ...env, LLM_MODEL: env.LLM_MODEL_FAST } : env;
+  const out = await llmJson(fastEnv, system, text, 400);
   const arr = (v) => (Array.isArray(v) ? v.filter((x) => typeof x === 'string' && x.trim()).map((x) => x.trim()).slice(0, 12) : []);
   const strength = ['light', 'medium', 'strong', 'any', 'unknown'].includes(out && out.strength) ? out.strength : 'unknown';
   return {
@@ -1056,6 +1066,17 @@ export function latin(s) {
 }
 
 async function makeImage(env, prompt) {
+  if ((env.IMAGE_PROVIDER || 'cloudflare') === 'openai') {
+    // OpenAI (картинки ChatGPT). Нужен секрет IMAGE_API_KEY — ключ с platform.openai.com.
+    const res = await fetch('https://api.openai.com/v1/images/generations', {
+      method: 'POST',
+      headers: { authorization: 'Bearer ' + env.IMAGE_API_KEY, 'content-type': 'application/json' },
+      body: JSON.stringify({ model: env.IMAGE_MODEL || 'gpt-image-2.5-flare', prompt, size: '1024x1024', quality: env.IMAGE_QUALITY || 'medium', n: 1 }),
+    });
+    const j = await res.json().catch(() => ({}));
+    if (!res.ok || !j.data || !j.data[0] || !j.data[0].b64_json) throw new Error('openai image ' + res.status + ' ' + JSON.stringify(j).slice(0, 200));
+    return Uint8Array.from(atob(j.data[0].b64_json), (c) => c.charCodeAt(0));
+  }
   const model = env.IMAGE_MODEL || '@cf/black-forest-labs/flux-2-klein-4b';
   let r;
   if (model.includes('flux-2')) {
