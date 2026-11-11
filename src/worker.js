@@ -53,6 +53,8 @@ export const DEFAULT_TEXTS = {
   btn_strong: ['🔥 Крепко', '🔥 Թունդ', 'Кнопка крепости'],
   btn_any: ['Без разницы', 'Միևնույն է', 'Кнопка крепости'],
   picking: ['🔎 Подбираю миксы…', '🔎 Միքսեր եմ ընտրում…', 'Пока бот думает'],
+  strength_remembered: ['Крепость — как в прошлый раз: {s}. Захочешь иначе — просто напиши.', 'Թնդությունը՝ նախորդի պես․ {s}։ Եթե ուզում ես այլ կերպ, պարզապես գրիր։',
+    'Под «Подбираю миксы…», если бот взял крепость из прошлого запроса'],
   picking_more: ['🔄 Думаю над другими вариантами…', '🔄 Մտածում եմ այլ տարբերակների մասին…', 'После кнопки «Ещё варианты»'],
   cover: ['Твои {n} микса 👇 слева направо — по порядку', 'Քո {n} միքսերը 👇 ձախից աջ՝ ըստ հերթականության', 'Подпись под картинкой; {n} — сколько миксов'],
   mix_of: ['Микс {i} из {n}', 'Միքս {i}՝ {n}-ից', 'Над названием микса; {i} — номер, {n} — всего'],
@@ -90,7 +92,7 @@ export const DEFAULT_TEXTS = {
 };
 
 // Какие тексты показываем в таблице (остальные — служебные, живут в коде, но их тоже можно добавить строкой в таблицу).
-const MAIN_TEXT_KEYS = ['hello', 'choose_lang', 'lang_set', 'ask_strength', 'btn_light', 'btn_medium', 'btn_strong', 'btn_any',
+const MAIN_TEXT_KEYS = ['hello', 'choose_lang', 'lang_set', 'ask_strength', 'strength_remembered', 'btn_light', 'btn_medium', 'btn_strong', 'btn_any',
   'cover', 'mix_of', 'best', 'strength_label', 'bowl_note', 'footer', 'btn_more', 'btn_new', 'description', 'about'];
 
 // Настройки: то, что код гарантирует сам, независимо от ИИ. Видно и меняется в таблице.
@@ -105,6 +107,8 @@ export const DEFAULT_SETTINGS = [
   { key: 'strong_only_on_request', def: 'да', type: 'yesno', desc: 'Крепкие табаки и крепкие линейки — только если клиент сам попросил крепко (да / нет).' },
   { key: 'strong_words', def: 'hard, strong, ligero, zombie, зомби, крепк, хард', type: 'list',
     desc: 'По каким словам в названии линейки или вкуса табак считается крепким. Через запятую.' },
+  { key: 'strength_memory_hours', def: '3', type: 'int', min: 0, max: 72,
+    desc: 'Сколько часов бот помнит выбранную клиентом крепость и не переспрашивает в следующих запросах. 0 — спрашивать каждый раз.' },
   { key: 'only_in_stock', def: 'да', type: 'yesno', desc: 'Только то, что есть на складе (да / нет). Заработает, когда подключим выгрузку склада; до этого — все вкусы наших брендов.' },
   { key: 'images', def: 'да', type: 'yesno', desc: 'Рисовать картинку к миксам (да / нет). Как она выглядит — во вкладке «Инструкция».' },
   { key: 'shop_url', def: 'https://vektorsigma.am', type: 'text', desc: 'Ссылка на магазин под миксами. Пусто — без ссылки.' },
@@ -127,7 +131,7 @@ export const DEFAULT_INSTRUCTION = [
   'КТО ТЫ',
   'Ты — опытный кальянный мастер магазина VektorSIGMA. Подбираешь клиенту 3 микса из табаков, которые есть у нас.',
   'КАК СОБИРАТЬ',
-  'Первый микс — максимально точное попадание в запрос. Второй и третий — альтернативы с другим характером, чтобы клиенту было из чего выбрать.',
+  'Все три микса должны отвечать на запрос. Если клиент просит миксы с конкретным вкусом или табаком («миксы с Кэтминтом», «что-нибудь с манго») — он есть в каждом из трёх миксов, а отличаются они сочетаниями вокруг него. Первый — самое точное попадание, второй и третий — другие по характеру, чтобы было из чего выбрать.',
   'Микс не должен быть однобоким. Если основа сладкая (десерт, сливки, шоколад, выпечка, орехи, карамель) — обязательно оттени её кислинкой, цитрусом или свежестью на 15–25%. Три десерта в одном миксе — нельзя, если клиент прямо не просил «чистый десерт».',
   'Яркие вкусы забивают остальные: гуава, мята, холодок, корица, кардамон, гвоздика, кофе, роза, лаванда, хвоя, эвкалипт, табак, сигара. Давай их только акцентом — до 20%, если клиент сам не просил именно этот вкус.',
   'Не ставь в один микс два почти одинаковых вкуса (две мяты, две малины), если клиент не просил усилить именно его.',
@@ -395,6 +399,18 @@ async function sheetScript(env, payload, fetcher = fetch) {
 }
 
 const STRENGTH_LOG = { light: 'Лёгко', medium: 'Средне', strong: 'Крепко', any: 'Без разницы' };
+const STRENGTHS = ['light', 'medium', 'strong', 'any'];
+
+/** Память о крепости клиента: сколько часов — настройка strength_memory_hours (0 — не помнить). */
+async function rememberStrength(env, chat, strength) {
+  const h = (await loadConfig(env)).settings.strength_memory_hours;
+  if (h > 0 && STRENGTHS.includes(strength)) await env.KV.put('strength:' + chat, strength, { expirationTtl: Math.max(60, h * 3600) });
+}
+async function recallStrength(env, chat) {
+  if (!((await loadConfig(env)).settings.strength_memory_hours > 0)) return null;
+  const s = await env.KV.get('strength:' + chat);
+  return STRENGTHS.includes(s) ? s : null;
+}
 
 /** Журнал во вкладке «Журнал»: что написал клиент и какую крепость выбрал кнопкой. Пишется в фоне — клиент не ждёт. */
 function logToSheet(env, ctx, payload) {
@@ -490,6 +506,7 @@ export function tx(cfg, lang = 'ru') {
     strength: [g('btn_light'), g('btn_medium'), g('btn_strong'), g('btn_any')],
     notRelevant: g('not_relevant'), notText: g('not_text'), error: g('error'), restart: g('restart'), expired: g('expired'),
     tellFirst: g('tell_first'), noCatalog: g('no_catalog'), picking: g('picking'), pickingMore: g('picking_more'),
+    strengthRemembered: (s) => fill(g('strength_remembered'), { s }),
     tooFew: g('too_few'), failed: g('failed'), more: g('btn_more'), newReq: g('btn_new'),
     mixOf: (i, n) => fill(g('mix_of'), { i, n }), best: g('best'), strengthLabel: g('strength_label'),
     strengthNames: ['', g('strength_1'), g('strength_2'), g('strength_3'), g('strength_4'), g('strength_5')],
@@ -635,6 +652,7 @@ async function onText(env, msg, ctx) {
 
   if (cmd === '/start' || cmd === '/help') {
     await env.KV.delete('s:' + chat);
+    await env.KV.delete('strength:' + chat); // начать заново — и крепость спросим заново
     const ru = await txt(env, 'ru'), hy = await txt(env, 'hy');
     return send(env, chat, ru.hello + LANG_SEPARATOR + hy.hello + '\n\n' + ru.chooseLang + ' ' + hy.chooseLang, langKeyboard());
   }
@@ -682,12 +700,21 @@ async function onText(env, msg, ctx) {
   await action(env, chat, 'typing');
   const prefs = await extractPrefs(env, request);
   if (!prefs.relevant) return send(env, chat, t.notRelevant);
-  if (prefs.strength === 'unknown' && !force) {
-    await putSession(env, chat, { stage: 'ask_strength', text: request, prefs });
-    return send(env, chat, t.askStrength, strengthKeyboard(t));
+  let note = '';
+  if (prefs.strength !== 'unknown') {
+    await rememberStrength(env, chat, prefs.strength); // назвал сам — запоминаем
+  } else if (!force) {
+    const remembered = await recallStrength(env, chat);
+    if (remembered) {
+      prefs.strength = remembered; // уже выбирал недавно — не переспрашиваем
+      note = t.strengthRemembered(t.strength[STRENGTHS.indexOf(remembered)]);
+    } else {
+      await putSession(env, chat, { stage: 'ask_strength', text: request, prefs });
+      return send(env, chat, t.askStrength, strengthKeyboard(t));
+    }
   }
   if (prefs.strength === 'unknown') prefs.strength = 'any';
-  await makeMixes(env, chat, { text: request, prefs, used: [], titles: [] }, false, lang);
+  await makeMixes(env, chat, { text: request, prefs, used: [], titles: [] }, false, lang, note);
 }
 
 /** /config — коротко, что сейчас действует. */
@@ -738,6 +765,7 @@ async function onCallback(env, cq, ctx) {
 
   if (data.startsWith('str:')) {
     session.prefs.strength = data.slice(4);
+    await rememberStrength(env, chat, session.prefs.strength);
     await logToSheet(env, ctx, { action: 'strength', userId: (cq.from && cq.from.id) || chat, strength: STRENGTH_LOG[session.prefs.strength] || session.prefs.strength });
     return makeMixes(env, chat, { text: session.text, prefs: session.prefs, used: [], titles: [] }, false, lang);
   }
@@ -765,14 +793,14 @@ function resultKeyboard(t) {
 
 /* ═════════════════════════ Подбор миксов ═════════════════════════ */
 
-async function makeMixes(env, chat, session, more = false, lang = 'ru') {
+async function makeMixes(env, chat, session, more = false, lang = 'ru', note = '') {
   const cfg = await loadConfig(env);
   env = applyBrains(env, cfg);
   const t = tx(cfg, lang);
   const catalog = await loadCatalog(env);
   if (!catalog.length) return send(env, chat, t.noCatalog);
 
-  await send(env, chat, more ? t.pickingMore : t.picking);
+  await send(env, chat, (more ? t.pickingMore : t.picking) + (note ? '\n<i>' + esc(note) + '</i>' : ''));
   await action(env, chat, 'typing');
 
   const candidates = pickCandidates(catalog, session.prefs, session.used || [], more, cfg);
@@ -923,7 +951,8 @@ export function composePrompt(cfg, lang = 'ru') {
     'ТЕХНИЧЕСКИЕ ТРЕБОВАНИЯ:\n' +
     '- Собери ровно 3 микса ТОЛЬКО из табаков списка. Формат строки списка: номер|табак|крепость по htreviews|рейтинг|вкусы [группы].\n' +
     `- В миксе от ${st.min_tobaccos} до ${st.max_tobaccos} табаков, доли — целые числа, кратные ${st.share_step}, в сумме ровно 100.\n` +
-    (st.no_repeats ? '- Каждый табак — только в одном из трёх миксов.\n' : '') +
+    (st.no_repeats ? '- Каждый табак — только в одном из трёх миксов (кроме отмеченных ★).\n' : '') +
+    '- Табаки с пометкой ★ клиент назвал сам: такой табак должен быть в КАЖДОМ из трёх миксов, в разных сочетаниях.\n' +
     '- title и text пиши на ' + t.llmLang + ' языке. Названия брендов и табаков не переводи.\n' +
     '- strength — итоговая крепость микса числом от 1 до 5 (1 лёгкая, 2 средне-лёгкая, 3 средняя, 4 средне-крепкая, 5 крепкая), с учётом инструкции.\n' +
     '- У каждого табака "look" НА АНГЛИЙСКОМ: густой глянцевый соус цвета этого вкуса, 3–6 слов ("glossy deep purple blackberry syrup").\n' +
@@ -934,8 +963,9 @@ export function composePrompt(cfg, lang = 'ru') {
 }
 
 async function composeMixes(env, session, candidates, lang = 'ru', cfg = DEFAULTS) {
+  const asked = askedKeys(candidates, session.prefs);
   const lines = candidates.map((it, i) =>
-    `${i + 1}|${it.b}${it.l && it.l !== 'Основная' ? ' ' + it.l : ''} — ${it.n}${it.a ? ' (' + it.a + ')' : ''}|` +
+    `${asked.has(it.k) ? '★' : ''}${i + 1}|${it.b}${it.l && it.l !== 'Основная' ? ' ' + it.l : ''} — ${it.n}${it.a ? ' (' + it.a + ')' : ''}|` +
     `${STRENGTH_NAME[effStrength(it, cfg.settings.strong_words)] || '?'}|${it.c >= 3 ? it.r : '-'}|${it.t.join(', ')}${it.g.length ? ' [' + it.g.join(', ') + ']' : ''}`);
   const want = { light: 'лёгкая', medium: 'средняя', strong: 'крепкая' }[session.prefs.strength] || 'любая';
   const user =
@@ -944,7 +974,7 @@ async function composeMixes(env, session, candidates, lang = 'ru', cfg = DEFAULT
     (session.titles && session.titles.length ? 'Уже предлагали, не повторяй: ' + session.titles.join('; ') + '\n' : '') +
     '\nТабаки в наличии:\n' + lines.join('\n');
   const out = await llmJson(env, composePrompt(cfg, lang), user, 4000);
-  const mixes = validateMixes(out, candidates, cfg);
+  const mixes = validateMixes(out, candidates, cfg, asked);
   if (out && !mixes.length) {
     await reportProblem(env, 'nomix', '⚠️ ИИ ответил, но ни один микс не прошёл проверку (номера табаков, доли). Начало ответа:\n' + JSON.stringify(out).slice(0, 600));
   }
@@ -959,7 +989,13 @@ async function composeMixes(env, session, candidates, lang = 'ru', cfg = DEFAULT
  * только табаки из списка, от min до max табаков, доли кратны share_step и в сумме 100,
  * без повторов табаков между миксами (no_repeats).
  */
-export function validateMixes(out, candidates, cfg = DEFAULTS) {
+/** Табаки, которые клиент назвал сам («миксы с Кэтминтом»): их ставим во все три микса, повторы для них разрешены. */
+export function askedKeys(candidates, prefs) {
+  const flavors = (prefs && prefs.flavors) || [];
+  return new Set(candidates.filter((it) => flavors.some((f) => similarName(f, it.n) || (it.a && similarName(f, it.a)))).map((it) => it.k));
+}
+
+export function validateMixes(out, candidates, cfg = DEFAULTS, asked = new Set()) {
   if (cfg && !cfg.settings && cfg.strength !== undefined) cfg = DEFAULTS; // старый вызов (prefs вместо cfg)
   const st = (cfg || DEFAULTS).settings;
   const step = st.share_step;
@@ -968,15 +1004,15 @@ export function validateMixes(out, candidates, cfg = DEFAULTS) {
   for (const m of (out && Array.isArray(out.mixes) ? out.mixes : []).slice(0, 3)) {
     const seen = new Set();
     let parts = (Array.isArray(m.parts) ? m.parts : [])
-      .map((p) => ({ item: candidates[Number(p.n) - 1], p: Number(p.p), look: typeof p.look === 'string' ? p.look.slice(0, 80) : '' }))
+      .map((p) => ({ item: candidates[Number(String(p.n).replace(/\D/g, '')) - 1], p: Number(p.p), look: typeof p.look === 'string' ? p.look.slice(0, 80) : '' }))
       .filter((p) => p.item && p.p > 0 && !seen.has(p.item.k) && seen.add(p.item.k))
       .sort((a, b) => b.p - a.p)
       .slice(0, st.max_tobaccos);
     // Табак уже был в предыдущем миксе — убираем повтор, если без него в миксе остаётся минимум табаков.
     if (st.no_repeats) {
-      const fresh = parts.filter((p) => !usedAll.has(p.item.k));
+      const fresh = parts.filter((p) => !usedAll.has(p.item.k) || asked.has(p.item.k));
       if (fresh.length < parts.length) {
-        const repeats = parts.filter((p) => usedAll.has(p.item.k)).sort((a, b) => b.p - a.p);
+        const repeats = parts.filter((p) => usedAll.has(p.item.k) && !asked.has(p.item.k)).sort((a, b) => b.p - a.p);
         parts = fresh.length >= st.min_tobaccos ? fresh : [...fresh, ...repeats.slice(0, st.min_tobaccos - fresh.length)];
       }
     }
