@@ -17,7 +17,8 @@
  * Биндинги: KV (хранилище), AI (Workers AI)
  * wrangler.toml [vars]: CONFIG_SHEET_ID, ADMIN_IDS, LLM_PROVIDER, LLM_MODEL, LLM_MODEL_FAST, LLM_BASE_URL,
  *                      IMAGE_PROVIDER, IMAGE_MODEL, IMAGE_QUALITY
- * Секреты: BOT_TOKEN, WEBHOOK_SECRET, LLM_API_KEY (платный ИИ), IMAGE_API_KEY (картинки OpenAI)
+ * Секреты: BOT_TOKEN, WEBHOOK_SECRET, LLM_API_KEY (платный ИИ), IMAGE_API_KEY (картинки OpenAI),
+ *          SHEET_SECRET (скрипт Google: журнал и чтение закрытой таблицы; адрес — SHEET_SCRIPT_URL)
  */
 
 /* ═════════════════════════ Значения по умолчанию ═════════════════════════
@@ -376,19 +377,58 @@ export async function loadConfig(env) {
   return cfg;
 }
 
+/**
+ * Скрипт Google (Apps Script), подключённый к таблице: отдаёт вкладки с настройками и пишет журнал.
+ * Адрес — SHEET_SCRIPT_URL в wrangler.toml, общий секрет — SHEET_SECRET (секрет в Cloudflare и константа в скрипте).
+ */
+async function sheetScript(env, payload, fetcher = fetch) {
+  const r = await fetcher(env.SHEET_SCRIPT_URL, {
+    method: 'POST', redirect: 'follow',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ ...payload, key: env.SHEET_SECRET }),
+  });
+  const text = await r.text();
+  let j;
+  try { j = JSON.parse(text); } catch (e) { throw new Error('скрипт ответил не JSON, код ' + r.status + ': ' + text.slice(0, 120)); }
+  if (!j.ok) throw new Error(j.error || 'ошибка скрипта');
+  return j;
+}
+
+const STRENGTH_LOG = { light: 'Лёгко', medium: 'Средне', strong: 'Крепко', any: 'Без разницы' };
+
+/** Журнал во вкладке «Журнал»: что написал клиент и какую крепость выбрал кнопкой. Пишется в фоне — клиент не ждёт. */
+function logToSheet(env, ctx, payload) {
+  if (!env.SHEET_SCRIPT_URL || !env.SHEET_SECRET) return;
+  const job = sheetScript(env, payload).catch((e) => {
+    console.log('journal', e.message);
+    return reportProblem(env, 'journal', '⚠️ Не получилось записать в журнал (вкладка «Журнал»): ' + e.message);
+  });
+  if (ctx && ctx.waitUntil) ctx.waitUntil(job); else return job;
+}
+
 /** Читает таблицу, проверяет и, если что-то изменилось, сохраняет копию. Ничего не ломает при ошибке. */
 export async function syncConfig(env, fetcher = fetch) {
   if (!env.CONFIG_SHEET_ID) return { ok: false, errors: ['в wrangler.toml не указан CONFIG_SHEET_ID'], warnings: [] };
-  const tabs = {};
-  try {
-    await Promise.all(SHEET_TABS.map(async (t) => {
-      const r = await fetchRetry(fetcher, sheetUrl(env.CONFIG_SHEET_ID, t.name), { headers: { accept: 'text/csv' } }, [1500, 4000]);
-      const text = await r.text();
-      if (!r.ok || /^\s*</.test(text)) throw new Error(r.ok ? 'нет доступа' : 'код ' + r.status);
-      tabs[t.name] = parseCSV(text);
-    }));
-  } catch (e) {
-    return { ok: false, warnings: [], errors: [`не могу прочитать таблицу (${e.message}). Проверьте доступ: «Все, у кого есть ссылка» — «Читатель»`] };
+  let tabs = {};
+  if (env.SHEET_SCRIPT_URL && env.SHEET_SECRET) {
+    // Через скрипт Google, подключённый к таблице: таблицу можно закрыть от посторонних.
+    try {
+      const j = await sheetScript(env, { action: 'config', tabs: SHEET_TABS.map((t) => t.name) }, fetcher);
+      for (const t of SHEET_TABS) if (Array.isArray(j.tabs && j.tabs[t.name])) tabs[t.name] = j.tabs[t.name].map((r) => r.map((c) => String(c)));
+    } catch (e) {
+      return { ok: false, warnings: [], errors: [`не могу прочитать таблицу через скрипт Google (${e.message}). Проверьте, что скрипт развёрнут и секрет в нём совпадает с SHEET_SECRET`] };
+    }
+  } else {
+    try {
+      await Promise.all(SHEET_TABS.map(async (t) => {
+        const r = await fetchRetry(fetcher, sheetUrl(env.CONFIG_SHEET_ID, t.name), { headers: { accept: 'text/csv' } }, [1500, 4000]);
+        const text = await r.text();
+        if (!r.ok || /^\s*</.test(text)) throw new Error(r.ok ? 'нет доступа' : 'код ' + r.status);
+        tabs[t.name] = parseCSV(text);
+      }));
+    } catch (e) {
+      return { ok: false, warnings: [], errors: [`не могу прочитать таблицу (${e.message}). Проверьте доступ: «Все, у кого есть ссылка» — «Читатель»`] };
+    }
   }
   const { cfg, errors, warnings } = buildConfig(tabs);
   if (errors.length) return { ok: false, errors, warnings };
@@ -551,7 +591,7 @@ async function onWebhook(request, env, ctx) {
   await env.KV.put(seenKey, '1', { expirationTtl: 600 });
 
   try {
-    if (update.callback_query) await onCallback(env, update.callback_query);
+    if (update.callback_query) await onCallback(env, update.callback_query, ctx);
     else if (update.message && update.message.text) await onText(env, update.message, ctx);
     else if (update.message) await send(env, update.message.chat.id, (await txt(env, await getLang(env, update.message.chat.id))).notText);
   } catch (e) {
@@ -619,6 +659,13 @@ async function onText(env, msg, ctx) {
     return;
   }
 
+  // Журнал: кто, когда и что написал.
+  const from = msg.from || {};
+  if (!cmd.startsWith('/')) {
+    await logToSheet(env, ctx, { action: 'message', ts: (msg.date ? msg.date * 1000 : Date.now()), userId: from.id || chat,
+      username: from.username || '', name: [from.first_name, from.last_name].filter(Boolean).join(' '), text: text.slice(0, 2000) });
+  }
+
   // Пишет на другом языке — переключаемся на него.
   let lang = await getLang(env, chat);
   const detected = detectLang(text);
@@ -653,6 +700,7 @@ export function configSummary(cfg, env = {}) {
   return '⚙️ <b>Настройки бота</b>\n' +
     `Таблица: ${env.CONFIG_SHEET_ID ? `<a href="https://docs.google.com/spreadsheets/d/${env.CONFIG_SHEET_ID}/edit">открыть</a>` : 'не подключена'}\n` +
     `Последнее изменение из таблицы: ${at}\n` +
+    `Журнал и чтение таблицы через скрипт Google: ${env.SHEET_SCRIPT_URL ? (env.SHEET_SECRET ? 'подключено' : 'адрес есть, но нет секрета SHEET_SECRET') : 'не подключено (SHEET_SCRIPT_URL пустой)'}\n` +
     `Режим мозгов (brains): <b>${esc(s.brains)}</b>\n` +
     `Мозги: ${esc(e.LLM_PROVIDER || 'cloudflare')} · ${esc(e.LLM_MODEL || 'llama-3.3-70b')}` +
     (e.LLM_MODEL_FAST ? ` (разбор запроса — ${esc(e.LLM_MODEL_FAST)})` : '') + '\n' +
@@ -667,7 +715,7 @@ export function configSummary(cfg, env = {}) {
     'Изменения в таблице подтягиваются сами раз в 15 минут, или сразу — командой /reload.';
 }
 
-async function onCallback(env, cq) {
+async function onCallback(env, cq, ctx) {
   const chat = cq.message.chat.id;
   const data = cq.data || '';
   await tg(env, 'answerCallbackQuery', { callback_query_id: cq.id });
@@ -690,6 +738,7 @@ async function onCallback(env, cq) {
 
   if (data.startsWith('str:')) {
     session.prefs.strength = data.slice(4);
+    await logToSheet(env, ctx, { action: 'strength', userId: (cq.from && cq.from.id) || chat, strength: STRENGTH_LOG[session.prefs.strength] || session.prefs.strength });
     return makeMixes(env, chat, { text: session.text, prefs: session.prefs, used: [], titles: [] }, false, lang);
   }
   if (data === 'more') {
