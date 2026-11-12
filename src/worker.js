@@ -159,14 +159,14 @@ export const DEFAULT_INSTRUCTION = [
   'Композиция занимает весь квадрат, без больших пустых мест. Сверху по центру логотип: слово SIGMA тонкими чёрными буквами, под ним MIX жирными чёрными буквами.',
   'В середине кадра в один ряд три крупных круга одинакового размера — микс 1, 2, 3 слева направо. Каждый круг — густые глянцевые соусы цвета вкусов микса, перетекающие друг в друга как инь-ян, с капелькой снизу.',
   'Рядом с каждым соусом, снаружи круга, — короткая подпись вкуса: «печенье», «карамель», «лимон». Мелко, аккуратно, тёмно-серым. Без линий, стрелок и выносок — и так понятно, к чему подпись.',
-  'Под каждым кругом — крупная чёрная цифра 1, 2, 3, а под цифрой название этого микса заглавными жирными буквами.',
+  'Под каждым кругом — название этого микса заглавными жирными чёрными буквами. Цифр и номеров нет.',
   'По краям и в нижних углах кадра свежие ингредиенты миксов, частично обрезанные краем. Сочные цвета, мягкие тени. Без брендов и процентов. Без людей, рук, кальянов, сигарет и дыма.',
   'КАРТИНКА: ОБРАЗЫ',
   'Одна квадратная картинка на все три микса, премиальная рекламная фуд-съёмка сверху. Светлый почти белый фон с лёгкой серой геометрией: тонкие круги, треугольники, плюсики, пунктир, штриховка.',
   'Композиция занимает весь квадрат, без больших пустых мест. Сверху по центру логотип: слово SIGMA тонкими чёрными буквами, под ним MIX жирными чёрными буквами.',
   'В середине кадра в один ряд три крупных изображения одинакового размера — микс 1, 2, 3 слева направо. Каждое изображение — это сам образ микса из его названия, а не абстрактный круг: если микс «Клубничный пломбир» — шарик пломбира с клубникой, если «Виски сауэр» — бокал коктейля с пенкой и лимоном, если «Брауни» — кусок брауни. Аппетитно, сочно, с глянцем, в цветах вкусов этого микса. Все три разные.',
   'Рядом с каждым изображением 2–3 коротких подписи вкусов из состава микса: «клубника», «сливки», «лёд». Мелко, аккуратно, тёмно-серым, без линий и стрелок.',
-  'Под каждым изображением — крупная чёрная цифра 1, 2, 3, а под цифрой название этого микса заглавными жирными буквами.',
+  'Под каждым изображением — название этого микса заглавными жирными чёрными буквами. Цифр и номеров нет.',
   'По краям и в нижних углах кадра свежие ингредиенты миксов, частично обрезанные краем. Сочные цвета, мягкие тени. Без брендов и процентов. Без людей, рук, кальянов, сигарет и дыма.',
   // Этот раздел идёт не миксологу, а на первый шаг — разбор сообщения клиента. Бот находит его по названию.
   'РАЗБОР ЗАПРОСА',
@@ -1062,9 +1062,9 @@ export function composePrompt(cfg, lang = 'ru') {
       ? (style === 'образы'
         ? '  Стиль «образы»: три РАЗНЫХ предмета — каждый изображает сам образ своего микса из названия (десерт, напиток, блюдо), никаких абстрактных кругов и одинаковых форм. '
         : '  Стиль «круги»: три одинаковых по размеру круга из глянцевых соусов; назови точный цвет каждого соуса каждого круга. Никаких других предметов вместо кругов. ') +
-        'Текст на картинке — на ' + t.llmLang + ' языке: подписи вкусов по 1–2 слова («печенье», «карамель», «лимон») рядом с тем, что они называют, БЕЗ линий и стрелок; под каждым миксом цифра и его название заглавными буквами. ' +
+        'Текст на картинке — на ' + t.llmLang + ' языке: подписи вкусов по 1–2 слова («печенье», «карамель», «лимон») рядом с тем, что они называют, БЕЗ линий и стрелок; под каждым миксом его название заглавными буквами, без цифр и номеров. ' +
         'Каждую подпись и каждое название дай в задании дословно в кавычках и укажи, к какому миксу и к какой его части они относятся. Бренды и проценты не пиши.\n'
-      : '  На картинке никаких подписей и названий, даже если в инструкции сказано иначе: только логотип и цифры 1, 2, 3 под миксами.\n') +
+      : '  На картинке никакого текста, кроме логотипа, даже если в инструкции сказано иначе: ни подписей, ни названий, ни цифр.\n') +
     'Верни ТОЛЬКО JSON: {"mixes":[{"title":"","parts":[{"n":1,"p":50,"look":""}],"text":"","strength":3,"garnish":""}],"image":""}';
 }
 
@@ -1176,7 +1176,7 @@ export function renderMix(m, i, t = 'ru', total = 3, bowl = 20) {
   });
   const strength = typeof m.strength === 'number' ? t.strengthNames[m.strength] : m.strength;
   return (
-    `<b>${i + 1} · ${esc(m.title.toLocaleUpperCase(t.lang === 'hy' ? 'hy' : 'ru'))}</b>\n` +
+    `<b>${esc(m.title.toLocaleUpperCase(t.lang === 'hy' ? 'hy' : 'ru'))}</b>\n` +
     (m.text ? `<i>${esc(m.text)}</i>\n` : '') +
     `<blockquote>${parts.join('\n')}</blockquote>` +
     (strength ? '\n' + t.strengthLabel + ' ' + esc(strength) : '')
@@ -1301,16 +1301,16 @@ export function parseJson(text) {
  * Обычно задание для картинки пишет ИИ по разделу «КАРТИНКА» из инструкции.
  * Этот шаблон — запасной, если ИИ задание не вернул. К любому заданию добавляется IMAGE_SAFETY.
  */
-const IMAGE_TEXT_RULES = 'Text in the image: the "SIGMA MIX" logo; a bold black digit centered under each mix (1, 2, 3 from left to right) with that mix name in bold black capitals right below the digit; and the short flavor labels given above — small neat dark-grey sans-serif words placed right next to the part they describe, with NO leader lines, arrows or pointers. All text spelled exactly as written, never overlapping the visuals or the logo. No brand names, no percentages, no other text. No people, no hands, no hookah, no cigarettes, no smoke.';
+const IMAGE_TEXT_RULES = 'Text in the image: the "SIGMA MIX" logo; the name of each mix in bold black capitals centered right under it, no digits or numbering; and the short flavor labels given above — small neat dark-grey sans-serif words placed right next to the part they describe, with NO leader lines, arrows or pointers. All text spelled exactly as written, never overlapping the visuals or the logo. No brand names, no percentages, no other text. No people, no hands, no hookah, no cigarettes, no smoke.';
 const IMAGE_LABELS = {
   'круги': 'Composition: fill the whole square — exactly three large round sauce swirls of the same size in one row in the vertical center, no big empty areas, especially below the swirls. ' + IMAGE_TEXT_RULES,
   'образы': 'Composition: fill the whole square — exactly three large, clearly different hero objects of similar size in one row in the vertical center, each one depicting its own mix as the dessert, drink or dish from its name; no abstract circles, no repeated shapes, no big empty areas. ' + IMAGE_TEXT_RULES,
 };
-const IMAGE_SAFETY = 'The only text in the image is the "SIGMA MIX" logo and one small bold black digit centered under each of the three mix visuals (1, 2, 3 from left to right): no other words, labels, numbers or percentages. No people, no hands, no hookah, no cigarettes, no smoke.';
+const IMAGE_SAFETY = 'The only text in the image is the "SIGMA MIX" logo: no other words, labels, numbers or percentages. No people, no hands, no hookah, no cigarettes, no smoke.';
 const IMAGE_TEMPLATE = {
   background: 'Square premium advertising poster for flavor mixes, top-down view, light off-white studio background with subtle minimal light-grey geometric decorations: thin outline circles, small solid triangles, plus signs, dashed lines and diagonal hatching',
   logo: 'At the top center, a modern logo: the word "SIGMA" in thin black sans-serif capitals, directly below it the word "MIX" in heavy bold black sans-serif capitals',
-  layout: 'Below the logo, {count} separate round swirls of the same size arranged in one horizontal row from left to right, evenly spaced, each with a small bold black digit centered below it, numbered 1, 2, 3 from left to right',
+  layout: 'Below the logo, {count} separate round swirls of the same size arranged in one horizontal row from left to right, evenly spaced',
   swirl: 'Each swirl is made of thick glossy liquid sauces flowing into each other like a yin-yang, with clear borders between colors, realistic shiny reflections and one small drip at the bottom edge',
   garnish: 'Fresh ingredients scattered around the edges of the frame, partially cropped',
   quality: 'High-end commercial food photography, soft natural shadows, vibrant saturated colors, crisp focus, clean balanced composition, lots of white space',
