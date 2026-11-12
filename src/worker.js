@@ -473,15 +473,15 @@ function logToSheet(env, ctx, payload) {
 }
 
 /** Читает таблицу, проверяет и, если что-то изменилось, сохраняет копию. Ничего не ломает при ошибке. */
-export async function syncConfig(env, fetcher = fetch) {
+export async function syncConfig(env, fetcher = fetch, withStock = false) {
   if (!env.CONFIG_SHEET_ID) return { ok: false, errors: ['в wrangler.toml не указан CONFIG_SHEET_ID'], warnings: [] };
   let tabs = {};
   let stockRows = null;
   if (env.SHEET_SCRIPT_URL && env.SHEET_SECRET) {
     // Через скрипт Google, подключённый к таблице: таблицу можно закрыть от посторонних.
     try {
-      const j = await sheetScript(env, { action: 'config', tabs: [...SHEET_TABS.map((t) => t.name), STOCK_TAB] }, fetcher);
-      if (Array.isArray(j.tabs && j.tabs[STOCK_TAB])) stockRows = j.tabs[STOCK_TAB].map((r) => r.map((c) => String(c)));
+      const j = await sheetScript(env, { action: 'config', tabs: [...SHEET_TABS.map((t) => t.name), ...(withStock ? [STOCK_TAB] : [])] }, fetcher);
+      if (withStock && Array.isArray(j.tabs && j.tabs[STOCK_TAB])) stockRows = j.tabs[STOCK_TAB].map((r) => r.map((c) => String(c)));
       for (const t of SHEET_TABS) if (Array.isArray(j.tabs && j.tabs[t.name])) tabs[t.name] = j.tabs[t.name].map((r) => r.map((c) => String(c)));
     } catch (e) {
       return { ok: false, warnings: [], errors: [`не могу прочитать таблицу через скрипт Google (${e.message}). Проверьте, что скрипт развёрнут и секрет в нём совпадает с SHEET_SECRET`] };
@@ -494,9 +494,7 @@ export async function syncConfig(env, fetcher = fetch) {
         if (!r.ok || /^\s*</.test(text)) throw new Error(r.ok ? 'нет доступа' : 'код ' + r.status);
         tabs[t.name] = parseCSV(text);
       }));
-      // «Наличие» — необязательная вкладка; если её нет, Google отдаёт первую — тогда parseStock не найдёт заголовок.
-      stockRows = await fetcher(sheetUrl(env.CONFIG_SHEET_ID, STOCK_TAB).replace('headers=1', 'headers=0'), { headers: { accept: 'text/csv' } })
-        .then((r) => r.text()).then((x) => (/^\s*</.test(x) ? null : parseCSV(x))).catch(() => null);
+      if (withStock) stockRows = await fetchStockRows(env, fetcher);
     } catch (e) {
       return { ok: false, warnings: [], errors: [`не могу прочитать таблицу (${e.message}). Проверьте доступ: «Все, у кого есть ссылка» — «Читатель»`] };
     }
@@ -516,7 +514,8 @@ export async function syncConfig(env, fetcher = fetch) {
       .some((k) => JSON.stringify((old.texts || {})[k]) !== JSON.stringify(cfg.texts[k]));
     if (tChanged || !prev) await applyProfile(env, cfg);
   }
-  const stock = await syncStock(env, stockRows, cfg).catch((e) => (console.log('stock', e.message), { state: 'error', error: e.message }));
+  const stock = withStock ? await syncStock(env, stockRows, cfg).catch((e) => (console.log('stock', e.message), { state: 'error', error: e.message })) : null;
+  if (stock) stock.rows = stockRows;
   return { ok: true, changed: !prev || sections.length > 0, sections: prev ? sections : Object.keys(SECTION_NAMES), newBrands, warnings, cfg, stock };
 }
 
@@ -544,6 +543,7 @@ export function syncReport(r) {
   if (r.warnings && r.warnings.length) s += '\n\n⚠️ Предупреждения:\n' + r.warnings.map((e) => '• ' + e).join('\n');
   if (r.stock && r.stock.state === 'error') s += '\n\n📦 Наличие: не получилось разобрать вкладку — ' + r.stock.error;
   else if (r.stock && (r.stock.state === 'ok' || r.stock.changed)) s += '\n\n' + stockLine(r.stock) + (r.stock.changed ? ' Обновлено.' : '');
+  else if (!r.stock) s += '\n\n📦 Наличие обновляется отдельно: само раз в 15 минут или сразу по команде /stock.';
   return s;
 }
 
@@ -644,12 +644,12 @@ export default {
 
 /** Раз в 15 минут: таблица → копия; новый бренд без вкусов → скачать (по одному за раз). */
 async function cronConfig(env) {
-  const r = await syncConfig(env);
+  const r = await syncConfig(env, fetch, true);
   const statusChanged = await saveStatus(env, r);
   if (!r.ok && statusChanged) await notifyAdmins(env, '⚠️ Автопроверка таблицы.\n' + syncReport(r));
   if (r.ok && (r.changed || statusChanged || (r.stock && r.stock.changed))) await notifyAdmins(env, '🔄 Автопроверка таблицы.\n' + syncReport(r));
   if (r.ok && r.stock && r.stock.pending) {
-    const n = await resolveStock(env, r.cfg).catch((e) => (console.log('resolveStock', e.message), 0));
+    const n = await resolveStock(env, r.cfg, r.stock.rows).catch((e) => (console.log('resolveStock', e.message), 0));
     if (n) await notifyAdmins(env, '📦 Разобрал с помощью ИИ нераспознанные позиции склада.\n' + stockReport(await env.KV.get('stock', 'json')).slice(0, 3500));
   }
   await crawlMissingBrand(env);
@@ -752,13 +752,19 @@ async function onText(env, msg, ctx) {
   if (cmd === '/reload' || cmd === '/config' || cmd === '/stock') {
     if (!(await adminIds(env)).includes(String(msg.from && msg.from.id))) return send(env, chat, 'Эта команда только для админов бота.');
     if (cmd === '/stock') {
-      let stock = await env.KV.get('stock', 'json').catch(() => null);
-      if (stock && stock.unmatched.some((u) => !u.tried)) {
-        await send(env, chat, '⏳ Разбираю нераспознанные позиции с помощью ИИ…');
-        await resolveStock(env, await loadConfig(env)).catch((e) => console.log('resolveStock', e.message));
-        stock = await env.KV.get('stock', 'json').catch(() => null);
+      await send(env, chat, '⏳ Читаю вкладку «Наличие»…');
+      const cfg = await loadConfig(env);
+      try {
+        const rows = await fetchStockRows(env);
+        const st = await syncStock(env, rows, cfg);
+        if (st.state === 'ok' && st.pending) {
+          await send(env, chat, `Нашёл сразу ${st.flavors} вкусов, ещё ${st.pending} позиций отдаю ИИ на разбор — это до минуты…`);
+          await resolveStock(env, cfg, rows);
+        }
+      } catch (e) {
+        return send(env, chat, '❌ Не получилось прочитать наличие: ' + esc(e.message));
       }
-      return send(env, chat, esc(stockReport(stock)).slice(0, 4000));
+      return send(env, chat, esc(stockReport(await env.KV.get('stock', 'json').catch(() => null))).slice(0, 4000));
     }
     if (cmd === '/config') return send(env, chat, configSummary(await loadConfig(env), env, await env.KV.get('stock', 'json').catch(() => null)));
     await send(env, chat, '⏳ Читаю таблицу…');
@@ -1653,21 +1659,40 @@ const escRe = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 const WEIGHT_RE = /(\d{2,3})\s*гр?\.?(?![а-яёa-z])/i;
 
 /** Из «Kraken/KRAKEN Medium Seco 30 гр» + «KRAKEN Medium Seco  Фисташки  30 гр» → бренд, линейка, вес, варианты названия вкуса. */
+const groupCache = new Map();
+/** Всё, что зависит только от группы («Kraken/KRAKEN Medium Seco 30 гр»), считаем один раз на группу. */
+function groupInfo(group, brandNames) {
+  const ck = group + '\u0001' + brandNames.join('|');
+  if (groupCache.has(ck)) return groupCache.get(ck);
+  const brand = brandNames.find((b) => squash(group).includes(squash(b))) || null;
+  let info = null;
+  if (brand && !/сигар[аы]/i.test(group)) {
+    const brandRe = new RegExp(escRe(brand), 'gi');
+    const cut = (s) => s.replace(brandRe, ' ').replace(WEIGHT_ALL, ' ').replace(/[\/"«»]/g, ' ');
+    const line = cut(group).replace(/\s+/g, ' ').trim();
+    const words = line.split(' ').filter((x) => x.length > 1);
+    const lineRe = words.length ? new RegExp('(^|\\s)(?:' + words.map(escRe).join('|') + ')(?=\\s|$)', 'gi') : null;
+    info = { brand, line, cut, lineRe, weight: Number((group.match(WEIGHT_RE) || [])[1]) || 0 };
+  }
+  if (groupCache.size > 500) groupCache.clear();
+  groupCache.set(ck, info);
+  return info;
+}
+const WEIGHT_ALL = new RegExp(WEIGHT_RE.source, 'gi');
+
+/** Из «Kraken/KRAKEN Medium Seco 30 гр» + «KRAKEN Medium Seco  Фисташки  30 гр» → бренд, линейка, вес, варианты названия вкуса. */
 export function stockEntry(pos, brandNames) {
-  const both = pos.group + ' ' + pos.name;
-  const brand = brandNames.find((b) => squash(both).includes(squash(b)));
-  if (!brand) return null;
-  if (/сигар[аы]/i.test(both)) return null; // сигары — не кальянный табак
-  const w = (pos.name.match(WEIGHT_RE) || pos.group.match(WEIGHT_RE) || [])[1];
-  const cut = (s) => s.replace(new RegExp(escRe(brand), 'gi'), ' ').replace(new RegExp(WEIGHT_RE.source, 'gi'), ' ').replace(/[\/"«»]/g, ' ');
-  const line = cut(pos.group).replace(/\s+/g, ' ').trim();
-  let flavor = cut(pos.name);
-  for (const word of line.split(' ').filter((x) => x.length > 1)) flavor = flavor.replace(new RegExp('(^|\\s)' + escRe(word) + '(?=\\s|$)', 'gi'), ' ');
+  const gi = groupInfo(pos.group, brandNames);
+  if (!gi || /сигар[аы]/i.test(pos.name)) return null;
+  const { brand, line } = gi;
+  const w = (pos.name.match(WEIGHT_RE) || [])[1];
+  let flavor = gi.cut(pos.name);
+  if (gi.lineRe) { flavor = flavor.replace(gi.lineRe, ' ').replace(gi.lineRe, ' '); }
   flavor = flavor.replace(/\s+HL\s*$/i, '').replace(/[.,;\s]+$/g, '').replace(/^[.,;\s]+/g, '').replace(/\s+/g, ' ').trim();
   if (!flavor) flavor = line;
   const m = flavor.match(/^(.*?)\s*\((.+)\)\s*$/);
   const names = (m ? [m[1], m[2], m[2].replace(/^аромат\w*\s+/i, '')] : [flavor]).map((x) => x.trim()).filter((x) => x.length >= 2);
-  return { brand, line, weight: Number(w) || 0, flavor, names: [...new Set(names)], id: (brand + '|' + line + '|' + flavor).toLowerCase() };
+  return { brand, line, weight: Number(w) || gi.weight, flavor, names: [...new Set(names)], id: (brand + '|' + line + '|' + flavor).toLowerCase() };
 }
 
 // Признаки линейки — чтобы «Strong Ligero» не сопоставился с «Medium Seco», а «Поп» — с обычным Хулиганом.
@@ -1693,36 +1718,32 @@ function lineScore(stockLine, catLine) {
  */
 export function matchStock(positions, catalog, map = {}) {
   const brandNames = [...new Set(catalog.map((x) => x.b))];
+  // Индекс справочника: бренд + «сжатое» название → табаки. Поиск по нему мгновенный —
+  // это важно: у бесплатного Cloudflare очень мало процессорного времени на запрос.
+  const index = new Map();
+  const add = (b, name, it) => { const q = squash(name); if (q.length < 2) return; const k = b + '|' + q; (index.get(k) || index.set(k, []).get(k)).push(it); };
+  for (const it of catalog) { add(it.b, it.n, it); if (it.a) add(it.b, it.a, it); }
   const items = {}, unmatched = [];
   let tobaccos = 0;
-  const seenUn = new Set();
+  const done = new Map(); // одна и та же позиция в разных фасовках ищется один раз
   for (const pos of positions) {
     const e = stockEntry(pos, brandNames);
     if (!e) continue;
     tobaccos++;
-    let key = map[e.id];
-    if (key === undefined) {
-      const hits = [];
-      for (const it of catalog) {
-        if (it.b !== e.brand) continue;
-        let rank = 0;
-        for (const v of e.names) {
-          const sv = squash(v);
-          if (sv && (sv === squash(it.n) || (it.a && sv === squash(it.a)))) { rank = 2; break; }
-          if (similarName(v, it.n) || (it.a && similarName(v, it.a))) rank = Math.max(rank, 1);
-        }
-        if (rank) hits.push({ it, rank, line: lineScore(e.line, it.l), diff: Math.abs(squash(it.n).length - squash(e.names[0]).length) });
+    if (!done.has(e.id)) {
+      let key = map[e.id];
+      if (key === undefined) {
+        const hits = [...new Set(e.names.flatMap((v) => index.get(e.brand + '|' + squash(v)) || []))]
+          .map((it) => ({ it, line: lineScore(e.line, it.l) }))
+          .sort((x, y) => y.line - x.line || (y.it.c || 0) - (x.it.c || 0));
+        // Совпало название, но линейка явно другая (Strong ↔ Medium) — не берём: это другой по крепости табак.
+        key = hits.length && hits[0].line > -3 ? hits[0].it.k : undefined;
       }
-      hits.sort((x, y) => y.rank - x.rank || y.line - x.line || x.diff - y.diff || (y.it.c || 0) - (x.it.c || 0));
-      // Совпало название, но линейка явно другая (Strong ↔ Medium) — не берём: это другой по крепости табак.
-      key = hits.length && hits[0].line > -3 ? hits[0].it.k : undefined;
+      done.set(e.id, key);
+      if (!key) unmatched.push({ id: e.id, brand: e.brand, line: e.line, flavor: e.flavor, tried: key === '' });
     }
-    if (key) {
-      (items[key] = items[key] || []).includes(e.weight) || items[key].push(e.weight);
-    } else if (!seenUn.has(e.id)) {
-      seenUn.add(e.id);
-      unmatched.push({ id: e.id, brand: e.brand, line: e.line, flavor: e.flavor, tried: key === '' });
-    }
+    const key = done.get(e.id);
+    if (key) (items[key] = items[key] || []).includes(e.weight) || items[key].push(e.weight);
   }
   for (const k of Object.keys(items)) items[k].sort((a, b) => a - b);
   return { items, unmatched, tobaccos };
@@ -1736,22 +1757,33 @@ const quickHash = (s) => { let h = 5381; for (let i = 0; i < s.length; i++) h = 
 
 /** Пересчитать наличие по строкам вкладки. Ничего не меняет, если выгрузка и справочник те же. */
 export async function syncStock(env, rows, cfg, force = false) {
-  const positions = parseStock(rows);
   const prev = await env.KV.get('stock', 'json').catch(() => null);
+  const map = (await env.KV.get('stockmap', 'json').catch(() => null)) || {};
+  // Дешёвая проверка до разбора: та же выгрузка, те же ответы ИИ, тот же день — ничего не делаем.
+  const hash = quickHash(JSON.stringify(rows || [])) + ':' + Object.keys(map).length + ':' + new Date().toISOString().slice(0, 10);
+  if (!force && prev && prev.hash === hash) return { state: 'ok', changed: false, ...stockStats(prev) };
+  const positions = parseStock(rows);
   if (!positions || !positions.length) {
     if (prev) { await env.KV.delete('stock'); catCache = { at: 0, sig: '', items: [] }; }
     return { state: 'none', changed: !!prev };
   }
   const catalog = await allBrandItems(env, cfg);
-  const map = (await env.KV.get('stockmap', 'json').catch(() => null)) || {};
-  const hash = quickHash(JSON.stringify([positions.map((p) => [p.group, p.name]), catalog.length, Object.keys(map).length]));
-  if (!force && prev && prev.hash === hash) return { state: 'ok', changed: false, ...stockStats(prev) };
   const res = matchStock(positions, catalog, map);
   const stock = { at: new Date().toISOString(), hash, positions: positions.length, tobaccos: res.tobaccos, items: res.items, unmatched: res.unmatched };
   await env.KV.put('stock', JSON.stringify(stock));
-  await env.KV.put('stock:rows', JSON.stringify(positions));
   catCache = { at: 0, sig: '', items: [] };
-  return { state: 'ok', changed: true, ...stockStats(stock) };
+  const same = prev && JSON.stringify(prev.items) === JSON.stringify(stock.items) && (prev.unmatched || []).length === stock.unmatched.length;
+  return { state: 'ok', changed: !same, ...stockStats(stock) };
+}
+
+/** Прочитать вкладку «Наличие» (через скрипт Google или по открытой ссылке). null — вкладки нет. */
+export async function fetchStockRows(env, fetcher = fetch) {
+  if (env.SHEET_SCRIPT_URL && env.SHEET_SECRET) {
+    const j = await sheetScript(env, { action: 'config', tabs: [STOCK_TAB] }, fetcher);
+    return Array.isArray(j.tabs && j.tabs[STOCK_TAB]) ? j.tabs[STOCK_TAB].map((r) => r.map((c) => String(c))) : null;
+  }
+  return fetcher(sheetUrl(env.CONFIG_SHEET_ID, STOCK_TAB).replace('headers=1', 'headers=0'), { headers: { accept: 'text/csv' } })
+    .then((r) => r.text()).then((x) => (/^\s*</.test(x) ? null : parseCSV(x))).catch(() => null);
 }
 const STOCK_MIN = 20; // меньше — считаем, что с выгрузкой что-то не так, и наличие не применяем
 const stockStats = (s) => ({ positions: s.positions, tobaccos: s.tobaccos, flavors: Object.keys(s.items || {}).length,
@@ -1765,7 +1797,7 @@ export function stockLine(st) {
 }
 
 /** Нераспознанные позиции отдаём ИИ: по каждому бренду — список со склада и список из справочника. */
-export async function resolveStock(env, cfg) {
+export async function resolveStock(env, cfg, rows = null) {
   const stock = await env.KV.get('stock', 'json').catch(() => null);
   const todo = ((stock && stock.unmatched) || []).filter((u) => !u.tried);
   if (!todo.length) return 0;
@@ -1775,7 +1807,7 @@ export async function resolveStock(env, cfg) {
   const brands = [...new Set(todo.map((u) => u.brand))];
   await Promise.all(brands.map(async (brand) => {
     const cat = catalog.filter((x) => x.b === brand);
-    const mine = todo.filter((u) => u.brand === brand).slice(0, 80);
+    const mine = todo.filter((u) => u.brand === brand).slice(0, 120);
     if (!cat.length) { for (const u of mine) map[u.id] = ''; return; }
     const sys = 'Ты сопоставляешь позиции склада кальянного магазина со справочником табаков бренда ' + brand + '. ' +
       'Для каждой позиции склада найди ТОТ ЖЕ табак в справочнике: то же название (возможен перевод, транслит, сокращение, другое написание) и та же линейка по крепости ' +
@@ -1783,19 +1815,12 @@ export async function resolveStock(env, cfg) {
       'Верни ТОЛЬКО JSON: {"номер позиции склада": номер из справочника или 0}.';
     const user = 'СПРАВОЧНИК (номер|линейка|название|второе название):\n' + cat.map((x, i) => `${i + 1}|${x.l}|${x.n}|${x.a}`).join('\n') +
       '\n\nСКЛАД (номер|линейка|название):\n' + mine.map((u, i) => `${i + 1}|${u.line}|${u.flavor}`).join('\n');
-    const out = await llmJson(e, sys, user, 3000);
+    const out = await llmJson(e, sys, user, 4000);
     if (!out) return; // ИИ не ответил — попробуем в следующий раз
     mine.forEach((u, i) => { const it = cat[Number(out[String(i + 1)]) - 1]; map[u.id] = it ? it.k : ''; });
   }));
   await env.KV.put('stockmap', JSON.stringify(map));
-  const rows = await env.KV.get('stock:rows', 'json').catch(() => null);
-  if (rows) {
-    const res = matchStock(rows, catalog, map);
-    Object.assign(stock, { items: res.items, unmatched: res.unmatched, tobaccos: res.tobaccos, at: new Date().toISOString(),
-      hash: quickHash(JSON.stringify([rows.map((p) => [p.group, p.name]), catalog.length, Object.keys(map).length])) });
-    await env.KV.put('stock', JSON.stringify(stock));
-    catCache = { at: 0, sig: '', items: [] };
-  }
+  if (rows) await syncStock(env, rows, cfg, true);
   return todo.length;
 }
 
