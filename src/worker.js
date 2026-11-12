@@ -116,6 +116,9 @@ export const DEFAULT_SETTINGS = [
   { key: 'strong_only_on_request', def: 'да', type: 'yesno', desc: 'Крепкие табаки и крепкие линейки — только если клиент сам попросил крепко (да / нет).' },
   { key: 'strong_words', def: 'hard, strong, ligero, zombie, зомби, крепк, хард', type: 'list',
     desc: 'По каким словам в названии линейки или вкуса табак считается крепким. Через запятую.' },
+  { key: 'odd_only_on_request', def: 'да', type: 'yesno', desc: 'Необычные вкусы (сыр, бекон, кактус…) — только если клиент сам попросил что-то странное или назвал такой вкус (да / нет).' },
+  { key: 'odd_flavors', def: 'сыр, бекон, мяс, рыб, селед, кактус, чеснок, гриб, томат, пицц, шашлык, колбас, горчиц, кетчуп, борщ, васаби, карри, оливк, укроп, гастроном, bacon, cactus, pizza, garlic, tomato', type: 'list',
+    desc: 'По каким словам в названии или тегах табак считается необычным. Слово — начало слова: «сыр» ловит «сырный». Через запятую.' },
   { key: 'strength_memory_hours', def: '3', type: 'int', min: 0, max: 72,
     desc: 'Сколько часов бот помнит выбранную клиентом крепость и не переспрашивает в следующих запросах. 0 — спрашивать каждый раз.' },
   { key: 'only_in_stock', def: 'да', type: 'yesno', desc: 'Только то, что есть на складе (да / нет). Заработает, когда подключим выгрузку склада; до этого — все вкусы наших брендов.' },
@@ -841,7 +844,7 @@ async function onText(env, msg, ctx) {
 }
 
 /** /config — коротко, что сейчас действует. */
-const CODE_VERSION = '12.11 · 5 (вопрос о крепости убирается, фасовки у всех табаков)';
+const CODE_VERSION = '12.11 · 6 (необычные вкусы только по запросу)';
 export function configSummary(cfg, env = {}, stock = null) {
   const at = cfg._at ? new Date(cfg._at).toLocaleString('ru-RU', { timeZone: 'Europe/Moscow', day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) + ' МСК' : 'ещё не загружалась — работают значения из кода';
   const s = cfg.settings;
@@ -864,7 +867,7 @@ export function configSummary(cfg, env = {}, stock = null) {
     `Чаша ${s.bowl_grams} г · табаков в миксе ${s.min_tobaccos}–${s.max_tobaccos} · доли кратны ${s.share_step}% · без повторов: ${yn(s.no_repeats)}\n` +
     `Стиль картинки: ${esc(s.image_style)} (${mixInstruction(cfg.instruction, s.image_style).fromTable ? 'раздел из таблицы' : 'текст из кода'})\n` +
     stockLine(stock ? { state: 'ok', ...stockStats(stock) } : null) + '\n' +
-    `Крепкое только по запросу: ${yn(s.strong_only_on_request)} · только из наличия: ${yn(s.only_in_stock)} · картинки: ${yn(s.images)}\n` +
+    `Крепкое только по запросу: ${yn(s.strong_only_on_request)} · необычное только по запросу: ${yn(s.odd_only_on_request)} · только из наличия: ${yn(s.only_in_stock)} · картинки: ${yn(s.images)}\n` +
     `Админов: ${s.admins.length + String(env.ADMIN_IDS || '').split(',').filter((x) => x.trim()).length}\n\n` +
     'Изменения в таблице подтягиваются сами раз в 15 минут, или сразу — командой /reload.';
 }
@@ -1042,7 +1045,7 @@ async function extractPrefs(env, text) {
   return {
     relevant: !out || out.relevant !== false, // если ИИ не ответил — не блокируем человека
     like: arr(out && out.like), avoid: arr(out && out.avoid), groups: arr(out && out.groups),
-    flavors: arr(out && out.flavors), brands: arr(out && out.brands), strength,
+    flavors: arr(out && out.flavors), brands: arr(out && out.brands), strength, odd: !!(out && out.odd === true),
   };
 }
 
@@ -1053,13 +1056,14 @@ export function parsePrompt(cfg, catalog = []) {
   return splitInstruction(cfg.instruction).parse.join('\n') + '\n\n' +
     'ТЕХНИЧЕСКИЕ ТРЕБОВАНИЯ:\n' +
     'Верни ТОЛЬКО JSON без пояснений:\n' +
-    '{"relevant":true,"like":[],"avoid":[],"groups":[],"flavors":[],"brands":[],"strength":"light|medium|strong|any|unknown"}\n' +
+    '{"relevant":true,"like":[],"avoid":[],"groups":[],"flavors":[],"brands":[],"strength":"light|medium|strong|any|unknown","odd":false}\n' +
     '- relevant: false, если сообщение не по теме.\n' +
     '- like — вкусы, которые клиент хочет, avoid — которых не хочет: по одному слову в именительном падеже ("Малина", "Лайм", "Мята"), ВСЕГДА по-русски (с армянского переводи).\n' +
     '- groups: подходящие направления строго из списка: ' + (groups.join(', ') || 'Фруктовый, Ягодный, Цитрусовый, Освежающий, Десертный') + '.\n' +
     '- flavors: конкретные табаки, которые клиент назвал. Если узнаёшь табак — в оригинальном написании ("Creme Brulee", "Epic Mint"), иначе как написал клиент.\n' +
     '- brands: бренды, которые клиент любит, строго из списка: ' + (brands.join(', ') || '—') + '. Написание клиента сопоставь с ближайшим брендом из списка.\n' +
-    '- strength: light — курит лёгкое, medium — среднее, strong — крепкое, any — всё равно, unknown — не сказал.';
+    '- strength: light — курит лёгкое, medium — среднее, strong — крепкое, any — всё равно, unknown — не сказал.\n' +
+    '- odd: true, только если клиент сам просит что-то странное, дикое, несъедобное или гастрономическое («вкус потных подмышек», «запах спортзала», «что-нибудь безумное», «сыр», «бекон»). Обычные просьбы (ягоды, фрукты, свежесть, десерты, «удиви меня») — false.';
 }
 
 /** Шаг 2. Код отбирает из справочника кандидатов под предпочтения. */
@@ -1080,9 +1084,18 @@ export function pickCandidates(catalog, prefs, used = [], more = false, cfg = DE
     return true; // «без разницы» / не сказал — всё, кроме крепкого
   };
 
+  // Необычное (сыр, бекон, кактус…) — только если клиент сам попросил странное или назвал такой вкус (odd_only_on_request).
+  const askedWords = norm([...prefs.like, ...flavors].join(' ')).split(/[^a-zа-я0-9]+/).filter(Boolean);
+  const okOdd = (it) => {
+    if (!st.odd_only_on_request || prefs.odd) return true;
+    const odd = oddWords(it, st.odd_flavors);
+    if (!odd.length) return true;
+    return odd.some((o) => askedWords.some((w) => w.startsWith(o))) || flavors.some((f) => similarName(f, it.n) || (it.a && similarName(f, it.a)));
+  };
+
   const scored = [];
   for (const it of catalog) {
-    if (!okStrength(it)) continue;
+    if (!okStrength(it) || !okOdd(it)) continue;
     const tagStems = it.t.map(stem);
     const nameWords = norm(it.n + ' ' + it.a).split(/[^a-zа-я0-9]+/).filter(Boolean).map(stem);
     if (avoid.some((a) => tagStems.includes(a) || nameWords.includes(a))) continue;
@@ -1604,6 +1617,11 @@ const d=document.createElement('p');d.textContent='Готово.';log.append(d);
 
 const norm = (s) => String(s || '').toLowerCase().replace(/ё/g, 'е').trim();
 
+/** Слова из настройки odd_flavors, по которым табак считается необычным: смотрим теги, направления, название. */
+export const oddWords = (it, words = DEFAULTS.settings.odd_flavors) => {
+  const ws = norm([...(it.t || []), ...(it.g || []), it.n, it.a].join(' ')).split(/[^a-zа-я0-9]+/).filter(Boolean);
+  return (words || []).map(norm).filter((o) => o && ws.some((w) => w.startsWith(o)));
+};
 /** Крепкие линейки по словам из настройки strong_words: Хулиган Hard, Kraken Strong Ligero, Хулиган Зомби и т.п. */
 export const isStrongLine = (it, words = DEFAULTS.settings.strong_words) => {
   const x = norm((it.l || '') + ' ' + (it.n || ''));
