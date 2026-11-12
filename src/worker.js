@@ -116,6 +116,7 @@ export const DEFAULT_SETTINGS = [
   { key: 'strong_only_on_request', def: 'да', type: 'yesno', desc: 'Крепкие табаки и крепкие линейки — только если клиент сам попросил крепко (да / нет).' },
   { key: 'strong_words', def: 'hard, strong, ligero, zombie, зомби, крепк, хард', type: 'list',
     desc: 'По каким словам в названии линейки или вкуса табак считается крепким. Через запятую.' },
+  { key: 'logo_overlay', def: 'да', type: 'yesno', desc: 'Накладывать на картинку готовый логотип (файл src/logo.png) вместо надписи, которую рисует модель (да / нет).' },
   { key: 'strength_memory_hours', def: '3', type: 'int', min: 0, max: 72,
     desc: 'Сколько часов бот помнит выбранную клиентом крепость и не переспрашивает в следующих запросах. 0 — спрашивать каждый раз.' },
   { key: 'only_in_stock', def: 'да', type: 'yesno', desc: 'Только то, что есть на складе (да / нет). Заработает, когда подключим выгрузку склада; до этого — все вкусы наших брендов.' },
@@ -830,7 +831,7 @@ async function onText(env, msg, ctx) {
 }
 
 /** /config — коротко, что сейчас действует. */
-const CODE_VERSION = '12.11 · 9 (бот помнит прошлый запрос: «то же самое, только лёгкое»)';
+const CODE_VERSION = '12.11 · 10 (готовый логотип на картинке)';
 export function configSummary(cfg, env = {}, stock = null) {
   const at = cfg._at ? new Date(cfg._at).toLocaleString('ru-RU', { timeZone: 'Europe/Moscow', day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) + ' МСК' : 'ещё не загружалась — работают значения из кода';
   const s = cfg.settings;
@@ -851,6 +852,7 @@ export function configSummary(cfg, env = {}, stock = null) {
     `Инструкция: ${cfg.instruction.filter(isSectionTitle).length} разделов, ${cfg.instruction.join(' ').length} знаков · ` +
     `разбор запроса: ${splitInstruction(cfg.instruction).parseFromTable ? 'из таблицы' : 'текст из кода'} · ограничений: ${cfg.limits.length}\n` +
     `Чаша ${s.bowl_grams} г · табаков в миксе ${s.min_tobaccos}–${s.max_tobaccos} · доли кратны ${s.share_step}% · без повторов: ${yn(s.no_repeats)}\n` +
+    `Логотип на картинке: ${s.logo_overlay ? (env.IMAGES ? 'готовый файл' : 'рисует модель (нет привязки IMAGES в wrangler.toml)') : 'рисует модель'}\n` +
     `Стиль картинки: ${esc(s.image_style)} (${mixInstruction(cfg.instruction, s.image_style).fromTable ? 'раздел из таблицы' : 'текст из кода'})\n` +
     stockLine(stock ? { state: 'ok', ...stockStats(stock) } : null) + '\n' +
     `Крепкое только по запросу: ${yn(s.strong_only_on_request)} · только из наличия: ${yn(s.only_in_stock)} · картинки: ${yn(s.images)}\n` +
@@ -994,10 +996,14 @@ async function makeMixes(env, chat, session, more = false, lang = 'ru', note = '
 /** Общая картинка: две попытки основной моделью, потом запасная. */
 async function coverImage(env, mixes, cfg) {
   // Задание от ИИ берём, если оно полноценное и с логотипом; иначе — запасной шаблон.
-  const own = String(mixes.image || '');
+  let own = String(mixes.image || '');
   const good = own.length > 200 && /sigma/i.test(own);
   const labels = env.IMAGE_PROVIDER === 'openai';
-  const prompt = good ? own + ' ' + (labels ? IMAGE_LABELS[cfg.settings.image_style] || IMAGE_LABELS['круги'] : IMAGE_SAFETY) : imagePrompt(mixes);
+  // Готовый логотип: модель надпись не рисует и оставляет наверху пустое место, код кладёт туда файл logo.png.
+  const logo = cfg.settings.logo_overlay && env.IMAGES && !(await env.KV.get('logo:off').catch(() => null)) ? await logoBytes(env) : null;
+  const noLogo = (x) => (logo ? x.replace(/the "SIGMA MIX" logo; /, '').replace(/The only text in the image is the "SIGMA MIX" logo: no other/, 'No text in the image at all: no') .replace(/ or the logo\./, '.') + ' ' + LOGO_ZONE : x);
+  if (logo) own = own.split(/(?<=[.!])\s+/).filter((x) => !/sigma|logo/i.test(x)).join(' ');
+  const prompt = noLogo(good ? own + ' ' + (labels ? IMAGE_LABELS[cfg.settings.image_style] || IMAGE_LABELS['круги'] : IMAGE_SAFETY) : imagePrompt(mixes, !!logo));
   let lastErr = '';
   const attempt = (e2) => makeImage(e2, prompt).catch((e) => (console.log('image', e.message), lastErr = e.message, null));
   let photo = await attempt(env);
@@ -1011,10 +1017,45 @@ async function coverImage(env, mixes, cfg) {
     const fallback = env.IMAGE_PROVIDER === 'openai' ? '@cf/black-forest-labs/flux-2-klein-4b'
       : (env.IMAGE_MODEL || '').includes('flux-1') ? null : '@cf/black-forest-labs/flux-1-schnell';
     // Бесплатная модель с текстом не дружит — ей даём шаблон без выносок.
-    if (fallback) photo = await makeImage({ ...env, IMAGE_PROVIDER: 'cloudflare', IMAGE_MODEL: fallback }, labels ? imagePrompt(mixes) : prompt)
+    if (fallback) photo = await makeImage({ ...env, IMAGE_PROVIDER: 'cloudflare', IMAGE_MODEL: fallback }, labels ? noLogo(imagePrompt(mixes, !!logo)) : prompt)
       .catch((e) => (console.log('image fallback', e.message), null));
   }
+  if (photo && logo) {
+    try {
+      photo = await drawLogo(env, photo, logo);
+    } catch (e) {
+      // Наложение не сработало (например, кончился месячный лимит Cloudflare Images): эта картинка уйдёт без логотипа,
+      // а следующие 6 часов логотип снова рисует сама модель.
+      console.log('logo', e.message);
+      await env.KV.put('logo:off', '1', { expirationTtl: 6 * 3600 }).catch(() => {});
+      await reportProblem(env, 'logo', '⚠️ Не получилось наложить логотип на картинку: ' + e.message + '\nБлижайшие 6 часов надпись SIGMA MIX рисует сама модель, потом попробую снова.');
+    }
+  }
   return photo;
+}
+
+/** Файл логотипа лежит рядом с кодом (src/logo.png) и попадает в бота при сборке. Нет файла — работаем без наложения. */
+let logoCache;
+async function logoBytes(env) {
+  if (env && env.LOGO_BYTES) return env.LOGO_BYTES; // для тестов
+  if (logoCache === undefined) {
+    try { const m = await import('./logo.png'); logoCache = new Uint8Array(m.default); } catch (e) { logoCache = null; }
+  }
+  return logoCache;
+}
+const asStream = (bytes) => new Response(bytes).body;
+
+/** Кладёт логотип сверху по центру. Размер и отступ — доли от ширины картинки, поэтому масштаб всегда один. */
+export async function drawLogo(env, photo, logo) {
+  let W = 1024;
+  try { const info = await env.IMAGES.info(asStream(photo)); if (info && info.width) W = info.width; } catch (e) { /* размер по умолчанию */ }
+  const width = Math.round(W * LOGO_BOX.width);
+  const out = await env.IMAGES.input(asStream(photo))
+    .draw(env.IMAGES.input(asStream(logo)).transform({ width }), { top: Math.round(W * LOGO_BOX.top), left: Math.round((W - width) / 2) })
+    .output({ format: 'image/jpeg', quality: 92 });
+  const bytes = new Uint8Array(await out.response().arrayBuffer());
+  if (bytes.length < 1000) throw new Error('пустой ответ сервиса картинок');
+  return bytes;
 }
 
 /** Шаг 1. ИИ превращает свободный текст в структуру предпочтений. */
@@ -1397,6 +1438,9 @@ const IMAGE_LABELS = {
   'круги': 'Composition: fill the whole square — exactly three large round sauce swirls of the same size in one row in the vertical center, no big empty areas, especially below the swirls. ' + IMAGE_TEXT_RULES,
   'образы': 'Composition: fill the whole square — exactly three large, clearly different hero objects of similar size in one row in the vertical center, each one depicting its own mix as the dessert, drink or dish from its name; no abstract circles, no repeated shapes, no big empty areas. ' + IMAGE_TEXT_RULES,
 };
+// Место под готовый логотип: сверху по центру. Те же доли использует наложение (LOGO_BOX).
+const LOGO_ZONE = 'IMPORTANT, this overrides anything above: do NOT draw any logo, title, brand name or the words "SIGMA" or "MIX" anywhere. Keep the top-center area completely empty — the middle 40% of the width, from the top edge down to 30% of the height: only the plain light background there, no fruit, no objects, no decorations, no text. A logo will be added there later. Everything else starts below that area.';
+const LOGO_BOX = { width: 0.27, top: 0.095 }; // доли от ширины картинки
 const IMAGE_SAFETY = 'The only text in the image is the "SIGMA MIX" logo: no other words, labels, numbers or percentages. No people, no hands, no hookah, no cigarettes, no smoke.';
 const IMAGE_TEMPLATE = {
   background: 'Square premium advertising poster for flavor mixes, top-down view, light off-white studio background with subtle minimal light-grey geometric decorations: thin outline circles, small solid triangles, plus signs, dashed lines and diagonal hatching',
@@ -1406,7 +1450,7 @@ const IMAGE_TEMPLATE = {
   garnish: 'Fresh ingredients scattered around the edges of the frame, partially cropped',
   quality: 'High-end commercial food photography, soft natural shadows, vibrant saturated colors, crisp focus, clean balanced composition, lots of white space',
 };
-export function imagePrompt(mixes) {
+export function imagePrompt(mixes, noLogo = false) {
   if (!Array.isArray(mixes)) mixes = [mixes];
   mixes = mixes.slice(0, 3);
   const n = mixes.length;
@@ -1419,7 +1463,7 @@ export function imagePrompt(mixes) {
   }).join('; ');
   const garnish = [...new Set(mixes.flatMap((m) => String(m.garnish || '').split(',').map((g) => g.trim().toLowerCase()).filter(Boolean)))].slice(0, 8).join(', ');
   const T = IMAGE_TEMPLATE;
-  return [T.background + '.', T.logo + '.', fill(T.layout, { count: count[n] || n }) + '.', T.swirl + ` — ${swirls}.`,
+  return [T.background + '.', noLogo ? '' : T.logo + '.', fill(T.layout, { count: count[n] || n }) + '.', T.swirl + ` — ${swirls}.`,
     garnish ? T.garnish + `: ${garnish}.` : '', T.quality + '.', IMAGE_SAFETY].filter(Boolean).join(' ');
 }
 
