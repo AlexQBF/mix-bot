@@ -164,14 +164,14 @@ export const DEFAULT_INSTRUCTION = [
   // Два стиля картинки. Какой работает — настройка image_style; ИИ получает только раздел выбранного стиля.
   'КАРТИНКА: КРУГИ',
   'Одна квадратная картинка на все три микса, премиальная рекламная фуд-съёмка сверху. Светлый почти белый фон с лёгкой серой геометрией: тонкие круги, треугольники, плюсики, пунктир, штриховка.',
-  'Композиция занимает весь квадрат, без больших пустых мест. Сверху по центру оставь пустое место под логотип — его добавят отдельно: ничего там не рисуй и не пиши.',
+  'Композиция занимает весь квадрат, без больших пустых мест. Сверху по центру оставь небольшое пустое место под логотип (примерно треть ширины) — его добавят отдельно: ничего там не рисуй и не пиши. Верхние углы заполни ингредиентами так же плотно, как нижние, вплотную к этому месту.',
   'В середине кадра в один ряд три крупных круга одинакового размера — микс 1, 2, 3 слева направо. Каждый круг — густые глянцевые соусы цвета вкусов микса, перетекающие друг в друга как инь-ян, с капелькой снизу.',
   'Рядом с каждым соусом, снаружи круга, — короткая подпись вкуса: «печенье», «карамель», «лимон». Мелко, аккуратно, тёмно-серым. Без линий, стрелок и выносок — и так понятно, к чему подпись.',
   'Под каждым кругом — название этого микса заглавными жирными чёрными буквами. Цифр и номеров нет.',
   'По краям и в нижних углах кадра свежие ингредиенты миксов, частично обрезанные краем. Сочные цвета, мягкие тени. Без брендов и процентов. Без людей, рук, кальянов, сигарет и дыма.',
   'КАРТИНКА: ОБРАЗЫ',
   'Одна квадратная картинка на все три микса, премиальная рекламная фуд-съёмка сверху. Светлый почти белый фон с лёгкой серой геометрией: тонкие круги, треугольники, плюсики, пунктир, штриховка.',
-  'Композиция занимает весь квадрат, без больших пустых мест. Сверху по центру оставь пустое место под логотип — его добавят отдельно: ничего там не рисуй и не пиши.',
+  'Композиция занимает весь квадрат, без больших пустых мест. Сверху по центру оставь небольшое пустое место под логотип (примерно треть ширины) — его добавят отдельно: ничего там не рисуй и не пиши. Верхние углы заполни ингредиентами так же плотно, как нижние, вплотную к этому месту.',
   'В середине кадра в один ряд три крупных изображения одинакового размера — микс 1, 2, 3 слева направо. Каждое изображение — это сам образ микса из его названия, а не абстрактный круг: если микс «Клубничный пломбир» — шарик пломбира с клубникой, если «Виски сауэр» — бокал коктейля с пенкой и лимоном, если «Брауни» — кусок брауни. Аппетитно, сочно, с глянцем, в цветах вкусов этого микса. Все три разные.',
   'Рядом с каждым изображением 2–3 коротких подписи вкусов из состава микса: «клубника», «сливки», «лёд». Мелко, аккуратно, тёмно-серым, без линий и стрелок.',
   'Под каждым изображением — название этого микса заглавными жирными чёрными буквами. Цифр и номеров нет.',
@@ -831,7 +831,7 @@ async function onText(env, msg, ctx) {
 }
 
 /** /config — коротко, что сейчас действует. */
-const CODE_VERSION = '12.11 · 11 (ограничения одной колонкой, инструкция без логотипа)';
+const CODE_VERSION = '12.11 · 12 (плотные верхние углы вокруг логотипа)';
 export function configSummary(cfg, env = {}, stock = null) {
   const at = cfg._at ? new Date(cfg._at).toLocaleString('ru-RU', { timeZone: 'Europe/Moscow', day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) + ' МСК' : 'ещё не загружалась — работают значения из кода';
   const s = cfg.settings;
@@ -1441,7 +1441,7 @@ const IMAGE_LABELS = {
   'образы': 'Composition: fill the whole square — exactly three large, clearly different hero objects of similar size in one row in the vertical center, each one depicting its own mix as the dessert, drink or dish from its name; no abstract circles, no repeated shapes, no big empty areas. ' + IMAGE_TEXT_RULES,
 };
 // Место под готовый логотип: сверху по центру. Те же доли использует наложение (LOGO_BOX).
-const LOGO_ZONE = 'IMPORTANT, this overrides anything above: do NOT draw any logo, title, brand name or the words "SIGMA" or "MIX" anywhere. Keep the top-center area completely empty — the middle 40% of the width, from the top edge down to 30% of the height: only the plain light background there, no fruit, no objects, no decorations, no text. A logo will be added there later. Everything else starts below that area.';
+const LOGO_ZONE = 'IMPORTANT, this overrides anything above: do NOT draw any logo, title, brand name or the words "SIGMA" or "MIX" anywhere. Reserve only one small clean rectangle at the top center for a logo that will be added later: the middle third of the width, between 7% and 27% of the height — just the plain light background there, no objects, no decorations, no text. Everything around that rectangle must be as rich and dense as the bottom of the picture: fill the top-left and top-right corners with large lush clusters of the fresh ingredients, partially cropped by the frame edges and reaching right up to the sides of the rectangle, plus the light-grey geometric decorations between them. No big empty white areas anywhere, especially not at the top.';
 const LOGO_BOX = { width: 0.27, top: 0.095 }; // доли от ширины картинки
 const IMAGE_SAFETY = 'The only text in the image is the "SIGMA MIX" logo: no other words, labels, numbers or percentages. No people, no hands, no hookah, no cigarettes, no smoke.';
 const IMAGE_TEMPLATE = {
