@@ -480,8 +480,8 @@ export async function syncConfig(env, fetcher = fetch, withStock = false) {
   if (env.SHEET_SCRIPT_URL && env.SHEET_SECRET) {
     // Через скрипт Google, подключённый к таблице: таблицу можно закрыть от посторонних.
     try {
-      const j = await sheetScript(env, { action: 'config', tabs: [...SHEET_TABS.map((t) => t.name), ...(withStock ? [STOCK_TAB] : [])] }, fetcher);
-      if (withStock && Array.isArray(j.tabs && j.tabs[STOCK_TAB])) stockRows = j.tabs[STOCK_TAB].map((r) => r.map((c) => String(c)));
+      const j = await sheetScript(env, { action: 'config', tabs: SHEET_TABS.map((t) => t.name) }, fetcher);
+      if (withStock) stockRows = await fetchStockRows(env, fetcher);
       for (const t of SHEET_TABS) if (Array.isArray(j.tabs && j.tabs[t.name])) tabs[t.name] = j.tabs[t.name].map((r) => r.map((c) => String(c)));
     } catch (e) {
       return { ok: false, warnings: [], errors: [`не могу прочитать таблицу через скрипт Google (${e.message}). Проверьте, что скрипт развёрнут и секрет в нём совпадает с SHEET_SECRET`] };
@@ -514,7 +514,7 @@ export async function syncConfig(env, fetcher = fetch, withStock = false) {
       .some((k) => JSON.stringify((old.texts || {})[k]) !== JSON.stringify(cfg.texts[k]));
     if (tChanged || !prev) await applyProfile(env, cfg);
   }
-  const stock = withStock ? await syncStock(env, stockRows, cfg).catch((e) => (console.log('stock', e.message), { state: 'error', error: e.message })) : null;
+  const stock = withStock ? await syncStock(env, stockRows, cfg, false, stockRows && stockRows.match).catch((e) => (console.log('stock', e.message), { state: 'error', error: e.message })) : null;
   if (stock) stock.rows = stockRows;
   return { ok: true, changed: !prev || sections.length > 0, sections: prev ? sections : Object.keys(SECTION_NAMES), newBrands, warnings, cfg, stock };
 }
@@ -774,7 +774,7 @@ async function onText(env, msg, ctx) {
       }
       try {
         const rows = await fetchStockRows(env);
-        const st = await syncStock(env, rows, cfg);
+        const st = await syncStock(env, rows, cfg, /заново|retry|ещ[её]/i.test(text), rows && rows.match);
         if (st.state === 'ok' && st.pending) {
           await send(env, chat, `Нашёл сразу ${st.flavors} вкусов, ещё ${st.pending} позиций отдаю ИИ на разбор — это до минуты…`);
           await resolveStock(env, cfg, rows);
@@ -1658,6 +1658,8 @@ async function sendPhoto(env, chat, bytes, caption, reply_markup) {
  * Бот берёт из неё табаки наших брендов, сопоставляет со справочником htreviews и собирает миксы только из них.
  */
 export const STOCK_TAB = 'Наличие';
+export const MATCH_TAB = 'Соответствия';
+const itemLabel = (it) => `${it.b} · ${it.l || '—'} · ${it.n}${it.a ? ' (' + it.a + ')' : ''}`;
 const cellNum = (v) => Number(String(v == null ? '' : v).replace(/\s/g, '').replace(',', '.')) || 0;
 
 /** Строки вкладки → позиции с остатком: { group, name, qty }. Группа — строка-заголовок вида «DEUS 30г». */
@@ -1739,7 +1741,7 @@ function lineScore(stockLine, catLine) {
  * Сопоставляем позиции склада со справочником. map — готовые ответы (от ИИ или прошлых запусков): id → ключ табака или ''.
  * Возвращает items: { ключ: [веса пачек] } и список нераспознанного.
  */
-export function matchStock(positions, catalog, map = {}) {
+export function matchStock(positions, catalog, map = {}, manual = {}) {
   const brandNames = [...new Set(catalog.map((x) => x.b))];
   // Индекс справочника: бренд + «сжатое» название → табаки. Поиск по нему мгновенный —
   // это важно: у бесплатного Cloudflare очень мало процессорного времени на запрос.
@@ -1749,13 +1751,16 @@ export function matchStock(positions, catalog, map = {}) {
   const items = {}, unmatched = [];
   let tobaccos = 0;
   const done = new Map(); // одна и та же позиция в разных фасовках ищется один раз
+  const pairs = new Map();
   for (const pos of positions) {
     const e = stockEntry(pos, brandNames);
     if (!e) continue;
     tobaccos++;
     if (!done.has(e.id)) {
-      let key = map[e.id];
+      let key = manual[e.id], who = 'вручную';
+      if (key === undefined) { key = map[e.id]; who = 'ИИ'; }
       if (key === undefined) {
+        who = 'по названию';
         const hits = [...new Set(e.names.flatMap((v) => index.get(e.brand + '|' + squash(v)) || []))]
           .map((it) => ({ it, line: lineScore(e.line, it.l) }))
           .sort((x, y) => y.line - x.line || (y.it.c || 0) - (x.it.c || 0));
@@ -1763,13 +1768,34 @@ export function matchStock(positions, catalog, map = {}) {
         key = hits.length && hits[0].line > -3 ? hits[0].it.k : undefined;
       }
       done.set(e.id, key);
+      pairs.set(e.id, { pos: `${e.brand} | ${e.line} | ${e.flavor}`, key: key || '', who: key === undefined ? 'ждёт разбора ИИ' : who, w: [] });
       if (!key) unmatched.push({ id: e.id, brand: e.brand, line: e.line, flavor: e.flavor, tried: key === '' });
     }
     const key = done.get(e.id);
     if (key) (items[key] = items[key] || []).includes(e.weight) || items[key].push(e.weight);
+    const pr = pairs.get(e.id); if (!pr.w.includes(e.weight)) pr.w.push(e.weight);
   }
   for (const k of Object.keys(items)) items[k].sort((a, b) => a - b);
-  return { items, unmatched, tobaccos };
+  return { items, unmatched, tobaccos, pairs: [...pairs.values()] };
+}
+
+/**
+ * Правки менеджера из колонки «Исправить вручную»: «нет» — такого табака в справочнике нет;
+ * иначе — слова, по которым табак ищется в справочнике («Spectrum Медиум Honey peach»).
+ */
+export function manualFixes(tabRows, catalog) {
+  const manual = {}, notes = {};
+  for (const r of (tabRows || []).slice(1)) {
+    const pos = String(r[0] || '').trim(), fix = String(r[4] || '').trim();
+    if (!pos || !fix) continue;
+    const id = pos.split('|').map((x) => x.trim()).join('|').toLowerCase();
+    if (/^(нет|no|-|0|—)$/i.test(fix)) { manual[id] = ''; continue; }
+    const q = words(fix);
+    const hits = catalog.filter((x) => { const hay = squash(itemLabel(x)); return q.length && q.every((wd) => hay.includes(wd)); })
+      .sort((x, y) => squash(itemLabel(x)).length - squash(itemLabel(y)).length);
+    if (hits.length) manual[id] = hits[0].k; else notes[id] = 'правка не понята: такого нет в справочнике';
+  }
+  return { manual, notes };
 }
 
 async function allBrandItems(env, cfg) {
@@ -1779,11 +1805,12 @@ async function allBrandItems(env, cfg) {
 const quickHash = (s) => { let h = 5381; for (let i = 0; i < s.length; i++) h = ((h << 5) + h + s.charCodeAt(i)) | 0; return String(h); };
 
 /** Пересчитать наличие по строкам вкладки. Ничего не меняет, если выгрузка и справочник те же. */
-export async function syncStock(env, rows, cfg, force = false) {
+export async function syncStock(env, rows, cfg, force = false, matchRows = null) {
   const prev = await env.KV.get('stock', 'json').catch(() => null);
   const map = (await env.KV.get('stockmap', 'json').catch(() => null)) || {};
   // Дешёвая проверка до разбора: та же выгрузка, те же ответы ИИ, тот же день — ничего не делаем.
-  const hash = quickHash(JSON.stringify(rows || [])) + ':' + Object.keys(map).length + ':' + new Date().toISOString().slice(0, 10);
+  const fixes = (matchRows || []).slice(1).filter((r) => r[4]).map((r) => [r[0], r[4]]);
+  const hash = quickHash(JSON.stringify(rows || [])) + ':' + Object.keys(map).length + ':' + quickHash(JSON.stringify(fixes)) + ':' + new Date().toISOString().slice(0, 10);
   if (!force && prev && prev.hash === hash) return { state: 'ok', changed: false, ...stockStats(prev) };
   const positions = parseStock(rows);
   if (!positions || !positions.length) {
@@ -1791,19 +1818,40 @@ export async function syncStock(env, rows, cfg, force = false) {
     return { state: 'none', changed: !!prev };
   }
   const catalog = await allBrandItems(env, cfg);
-  const res = matchStock(positions, catalog, map);
+  let tabError = '';
+  const { manual, notes } = manualFixes(matchRows, catalog);
+  const res = matchStock(positions, catalog, map, manual);
   const stock = { at: new Date().toISOString(), hash, positions: positions.length, tobaccos: res.tobaccos, items: res.items, unmatched: res.unmatched };
   await env.KV.put('stock', JSON.stringify(stock));
+  // Вкладка «Соответствия»: что с чем склеено. Пишем, только когда что-то пересчитали.
+  if (env.SHEET_SCRIPT_URL && env.SHEET_SECRET) {
+    const byKey = new Map(catalog.map((x) => [x.k, x]));
+    const tab = res.pairs.sort((a, b) => a.pos.localeCompare(b.pos, 'ru')).map((p) => {
+      const id = p.pos.split('|').map((x) => x.trim()).join('|').toLowerCase();
+      const it = byKey.get(p.key);
+      return [p.pos, it ? itemLabel(it) + (it.d ? ' — снят с производства' : '') : 'не найдено — в подборе не участвует', notes[id] || p.who, p.w.sort((a, b) => a - b).join(', ')];
+    });
+    tabError = await sheetScript(env, { action: 'match', rows: tab }).then(() => '', (e) => e.message);
+    if (tabError) {
+      console.log('match tab', tabError);
+      if (/unknown action|не знает действие/i.test(tabError)) tabError = 'в таблице развёрнута старая версия скрипта Google — обновите его (Управление развертываниями → карандаш → Новая версия)';
+      await reportProblem(env, 'matchtab', '⚠️ Не получилось записать вкладку «Соответствия»: ' + tabError);
+    }
+  }
   catCache = { at: 0, sig: '', items: [] };
   const same = prev && JSON.stringify(prev.items) === JSON.stringify(stock.items) && (prev.unmatched || []).length === stock.unmatched.length;
-  return { state: 'ok', changed: !same, ...stockStats(stock) };
+  if (tabError) { stock.tabError = tabError; await env.KV.put('stock', JSON.stringify(stock)); }
+  return { state: 'ok', changed: !same, ...stockStats(stock), tabError };
 }
 
 /** Прочитать вкладку «Наличие» (через скрипт Google или по открытой ссылке). null — вкладки нет. */
 export async function fetchStockRows(env, fetcher = fetch) {
   if (env.SHEET_SCRIPT_URL && env.SHEET_SECRET) {
-    const j = await sheetScript(env, { action: 'config', tabs: [STOCK_TAB] }, fetcher);
-    return Array.isArray(j.tabs && j.tabs[STOCK_TAB]) ? j.tabs[STOCK_TAB].map((r) => r.map((c) => String(c))) : null;
+    const j = await sheetScript(env, { action: 'config', tabs: [STOCK_TAB, MATCH_TAB] }, fetcher);
+    const get = (n) => (Array.isArray(j.tabs && j.tabs[n]) ? j.tabs[n].map((r) => r.map((c) => String(c))) : null);
+    const rows = get(STOCK_TAB);
+    if (rows) rows.match = get(MATCH_TAB);
+    return rows;
   }
   return fetcher(sheetUrl(env.CONFIG_SHEET_ID, STOCK_TAB).replace('headers=1', 'headers=0'), { headers: { accept: 'text/csv' } })
     .then((r) => r.text()).then((x) => (/^\s*</.test(x) ? null : parseCSV(x))).catch(() => null);
@@ -1846,7 +1894,7 @@ export async function resolveStock(env, cfg, rows = null) {
     mine.forEach((u, i) => { const it = cat[Number(out[String(i + 1)]) - 1]; map[u.id] = it ? it.k : ''; });
   }));
   await env.KV.put('stockmap', JSON.stringify(map));
-  if (rows) await syncStock(env, rows, cfg, true);
+  if (rows) await syncStock(env, rows, cfg, true, rows.match);
   return todo.length;
 }
 
@@ -1857,6 +1905,7 @@ export function stockReport(stock) {
   let s = stockLine(st) + '\nОбновлено: ' + new Date(stock.at).toLocaleString('ru-RU', { timeZone: 'Europe/Moscow', day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) + ' МСК';
   const by = {};
   for (const k of Object.keys(stock.items)) { const b = k.split('/')[0]; by[b] = (by[b] || 0) + 1; }
+  if (stock.tabError) s += '\n\n⚠️ Вкладка «Соответствия» не записана: ' + stock.tabError;
   s += '\n\nПо брендам: ' + Object.entries(by).map(([b, n]) => `${b} — ${n}`).join(', ');
   if (stock.unmatched.length) {
     s += '\n\n❓ Не распознано (в подборе не участвуют). Спросить ИИ ещё раз: /stock заново. Посмотреть, что есть в справочнике: /find spectrum honey\n' + stock.unmatched.slice(0, 60).map((u) => `• ${u.brand} ${u.line} — ${u.flavor}`).join('\n') +
