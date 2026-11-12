@@ -68,6 +68,8 @@ export const DEFAULT_TEXTS = {
   strength_3: ['средняя', 'միջին', 'Крепость микса'],
   strength_4: ['средне-крепкая', 'միջին-թունդ', 'Крепость микса'],
   strength_5: ['крепкая', 'թունդ', 'Крепость микса'],
+  pack_one: ['пачка {g} г', '{g} գ տուփ', 'Пометка у табака: в какой пачке он есть; {g} — вес пачки'],
+  pack_many: ['пачки {g} г', 'տուփեր՝ {g} գ', 'Пометка у табака, если есть несколько пачек; {g} — веса через «/»'],
   pack_note: ['только пачка {g} г', 'միայն {g} գ տուփ', 'Пометка у табака, которого нет в маленькой пачке; {g} — вес пачки'],
   bowl_note: ['Граммы указаны на чашу {g} г.', 'Գրամները նշված են {g} գ թասի համար։', 'Под последним миксом; {g} — граммы в чаше'],
   footer: ['🛒 Покажи этот список в магазине — соберём.', '🛒 Ցույց տուր այս ցուցակը խանութում, և մենք կհավաքենք։', 'Под последним миксом, перед ссылкой на сайт'],
@@ -572,7 +574,7 @@ export function tx(cfg, lang = 'ru') {
     tooFew: g('too_few'), failed: g('failed'), more: g('btn_more'), newReq: g('btn_new'),
     strengthLabel: g('strength_label'),
     strengthNames: ['', g('strength_1'), g('strength_2'), g('strength_3'), g('strength_4'), g('strength_5')],
-    gram: g('gram'), packNote: (w) => fill(g('pack_note'), { g: w }), bowlNote: (gr) => fill(g('bowl_note'), { g: gr }), footer: g('footer'),
+    gram: g('gram'), packNote: (w) => fill(g('pack_note'), { g: w }), packOne: (w) => fill(g('pack_one'), { g: w }), packMany: (w) => fill(g('pack_many'), { g: w }), bowlNote: (gr) => fill(g('bowl_note'), { g: gr }), footer: g('footer'),
     llmLang: lang === 'hy' ? 'армянском (восточноармянский литературный, армянским алфавитом)' : 'русском',
   };
 }
@@ -815,6 +817,7 @@ async function onText(env, msg, ctx) {
   if (session && session.stage === 'ask_strength') {
     request = session.text + '\n' + text; // ответ на уточняющий вопрос
     force = true;
+    if (session.askId) await tg(env, 'deleteMessage', { chat_id: chat, message_id: session.askId }).catch(() => {});
   }
   await action(env, chat, 'typing');
   const prefs = await extractPrefs(env, request);
@@ -828,8 +831,9 @@ async function onText(env, msg, ctx) {
       prefs.strength = remembered; // уже выбирал недавно — не переспрашиваем
       note = t.strengthRemembered(t.strength[STRENGTHS.indexOf(remembered)]);
     } else {
-      await putSession(env, chat, { stage: 'ask_strength', text: request, prefs });
-      return send(env, chat, t.askStrength, strengthKeyboard(t));
+      const asked = await send(env, chat, t.askStrength, strengthKeyboard(t));
+      // Запоминаем номер вопроса, чтобы убрать его, когда клиент ответит.
+      return putSession(env, chat, { stage: 'ask_strength', text: request, prefs, askId: (asked && asked.result && asked.result.message_id) || 0 });
     }
   }
   if (prefs.strength === 'unknown') prefs.strength = 'any';
@@ -837,7 +841,7 @@ async function onText(env, msg, ctx) {
 }
 
 /** /config — коротко, что сейчас действует. */
-const CODE_VERSION = '12.11 · 4 (строка «нет в наличии» перед миксами)';
+const CODE_VERSION = '12.11 · 5 (вопрос о крепости убирается, фасовки у всех табаков)';
 export function configSummary(cfg, env = {}, stock = null) {
   const at = cfg._at ? new Date(cfg._at).toLocaleString('ru-RU', { timeZone: 'Europe/Moscow', day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) + ' МСК' : 'ещё не загружалась — работают значения из кода';
   const s = cfg.settings;
@@ -888,6 +892,8 @@ async function onCallback(env, cq, ctx) {
 
   if (data.startsWith('str:')) {
     session.prefs.strength = data.slice(4);
+    // Вопрос с кнопками больше не нужен — убираем, чтобы в чате остались только запрос и миксы.
+    if (cq.message.message_id) await tg(env, 'deleteMessage', { chat_id: chat, message_id: cq.message.message_id }).catch(() => {});
     await rememberStrength(env, chat, session.prefs.strength);
     await logToSheet(env, ctx, { action: 'strength', userId: (cq.from && cq.from.id) || chat, strength: STRENGTH_LOG[session.prefs.strength] || session.prefs.strength });
     return makeMixes(env, chat, { text: session.text, prefs: session.prefs, used: [], titles: [] }, false, lang);
@@ -1256,8 +1262,9 @@ export function renderMix(m, i, t = 'ru', total = 3, bowl = 20) {
     const it = p.item;
     const line = it.l && it.l !== 'Основная' ? ' ' + it.l : '';
     const g = Math.round((p.p * bowl) / 100 * 2) / 2; // до полуграмма
-    // В наличии только большая пачка — честно предупреждаем.
-    const pack = Array.isArray(it.w) && it.w.length && it.w[0] > 40 ? ` · <i>${esc(t.packNote(it.w[0]))}</i>` : '';
+    // Фасовка из наличия: «пачка 25 г», «пачки 25 / 100 г», а если есть только большая — «только пачка 200 г».
+    const w = Array.isArray(it.w) ? [...new Set(it.w)].sort((a, b) => a - b) : [];
+    const pack = !w.length ? '' : ` · <i>${esc(w.length > 1 ? t.packMany(w.join(' / ')) : w[0] > 40 ? t.packNote(w[0]) : t.packOne(w[0]))}</i>`;
     return `${p.p}% · ${String(g).replace('.', ',')} ${t.gram} — <b>${esc(it.n)}</b> · ${esc(it.b + line)}${pack}`;
   });
   const strength = typeof m.strength === 'number' ? t.strengthNames[m.strength] : m.strength;
