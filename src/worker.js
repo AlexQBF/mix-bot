@@ -749,11 +749,29 @@ async function onText(env, msg, ctx) {
   }
   // Служебные команды: /id — всем (чтобы узнать свой ID для настройки admins), остальные — только админам.
   if (cmd === '/id') return send(env, chat, `Твой Telegram ID: <code>${msg.from && msg.from.id}</code>`);
-  if (cmd === '/reload' || cmd === '/config' || cmd === '/stock') {
+  if (cmd === '/reload' || cmd === '/config' || cmd === '/stock' || cmd === '/find') {
     if (!(await adminIds(env)).includes(String(msg.from && msg.from.id))) return send(env, chat, 'Эта команда только для админов бота.');
+    if (cmd === '/find') {
+      // Поиск по справочнику htreviews: /find spectrum honey
+      const q = words(text.replace(/^\/find\S*/i, ''));
+      if (!q.length) return send(env, chat, 'Напиши, что искать: /find spectrum honey');
+      const all = await allBrandItems(env, await loadConfig(env));
+      const stock = await env.KV.get('stock', 'json').catch(() => null);
+      const hit = all.filter((x) => { const hay = squash(x.b + ' ' + x.l + ' ' + x.n + ' ' + x.a); return q.every((w) => hay.includes(w)); });
+      const lines = [...new Set(all.filter((x) => q.some((w) => squash(x.b).includes(w))).map((x) => x.b + ' · ' + (x.l || '—')))];
+      return send(env, chat, esc(`В справочнике всего ${all.length} табаков. Найдено: ${hit.length}\n` +
+        hit.slice(0, 40).map((x) => `${stock && stock.items && stock.items[x.k] ? '✅' : '▫️'} ${x.b} · ${x.l || '—'} · ${x.n}${x.a ? ' (' + x.a + ')' : ''}`).join('\n') +
+        (lines.length ? '\n\nЛинейки в справочнике: ' + lines.join('; ') : '')).slice(0, 4000));
+    }
     if (cmd === '/stock') {
       await send(env, chat, '⏳ Читаю вкладку «Наличие»…');
       const cfg = await loadConfig(env);
+      if (/заново|retry|ещ[её]/i.test(text)) {
+        // Забываем ответы «не нашёл» — ИИ посмотрит на эти позиции ещё раз.
+        const map = (await env.KV.get('stockmap', 'json').catch(() => null)) || {};
+        for (const k of Object.keys(map)) if (!map[k]) delete map[k];
+        await env.KV.put('stockmap', JSON.stringify(map));
+      }
       try {
         const rows = await fetchStockRows(env);
         const st = await syncStock(env, rows, cfg);
@@ -1810,8 +1828,11 @@ export async function resolveStock(env, cfg, rows = null) {
     const mine = todo.filter((u) => u.brand === brand).slice(0, 120);
     if (!cat.length) { for (const u of mine) map[u.id] = ''; return; }
     const sys = 'Ты сопоставляешь позиции склада кальянного магазина со справочником табаков бренда ' + brand + '. ' +
-      'Для каждой позиции склада найди ТОТ ЖЕ табак в справочнике: то же название (возможен перевод, транслит, сокращение, другое написание) и та же линейка по крепости ' +
-      '(Strong / Hard / Ligero не равно Medium / Classic). Если точного соответствия нет — ставь 0, не подбирай «похожий вкус». ' +
+      'Для каждой позиции склада найди ТОТ ЖЕ табак в справочнике. Название на складе и в справочнике часто на разных языках: ' +
+      'переводи в обе стороны (Honeycomb = Медовые соты, Pine Wood = Сосна / Хвоя, Rye Bread = Ржаной хлеб, Никарагуанский кофе = Nicaragua Coffee), учитывай транслит, сокращения и другое написание; ' +
+      'смотри и на название, и на второе название. Линейки тоже пишут по-разному: Classic Line = Классик, Hard Line = Хард, Medium Line = Медиум, Mix Line = Микс — это одна и та же линейка. ' +
+      'Крепость линейки должна совпадать: Strong / Hard / Ligero не равно Medium / Classic. Если такого же вкуса в той же линейке в справочнике нет, но он есть в другой линейке той же крепости или линейка в справочнике не указана — бери его. ' +
+      'Если этого вкуса в справочнике нет совсем — ставь 0, не подбирай «похожий вкус». ' +
       'Верни ТОЛЬКО JSON: {"номер позиции склада": номер из справочника или 0}.';
     const user = 'СПРАВОЧНИК (номер|линейка|название|второе название):\n' + cat.map((x, i) => `${i + 1}|${x.l}|${x.n}|${x.a}`).join('\n') +
       '\n\nСКЛАД (номер|линейка|название):\n' + mine.map((u, i) => `${i + 1}|${u.line}|${u.flavor}`).join('\n');
@@ -1833,7 +1854,7 @@ export function stockReport(stock) {
   for (const k of Object.keys(stock.items)) { const b = k.split('/')[0]; by[b] = (by[b] || 0) + 1; }
   s += '\n\nПо брендам: ' + Object.entries(by).map(([b, n]) => `${b} — ${n}`).join(', ');
   if (stock.unmatched.length) {
-    s += '\n\n❓ Не распознано (в подборе не участвуют):\n' + stock.unmatched.slice(0, 60).map((u) => `• ${u.brand} ${u.line} — ${u.flavor}`).join('\n') +
+    s += '\n\n❓ Не распознано (в подборе не участвуют). Спросить ИИ ещё раз: /stock заново. Посмотреть, что есть в справочнике: /find spectrum honey\n' + stock.unmatched.slice(0, 60).map((u) => `• ${u.brand} ${u.line} — ${u.flavor}`).join('\n') +
       (stock.unmatched.length > 60 ? `\n…и ещё ${stock.unmatched.length - 60}` : '');
   }
   return s;
