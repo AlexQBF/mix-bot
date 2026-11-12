@@ -852,7 +852,7 @@ async function onText(env, msg, ctx) {
 }
 
 /** /config — коротко, что сейчас действует. */
-const CODE_VERSION = '12.11 · 20 (новый запрос не смешивается с прошлым)';
+const CODE_VERSION = '12.11 · 21 (вкус — не название табака: без лишнего «нет в наличии»)';
 export function configSummary(cfg, env = {}, stock = null) {
   const at = cfg._at ? new Date(cfg._at).toLocaleString('ru-RU', { timeZone: 'Europe/Moscow', day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) + ' МСК' : 'ещё не загружалась — работают значения из кода';
   const s = cfg.settings;
@@ -1323,7 +1323,11 @@ export function askedKeys(candidates, prefs, text = '') {
     return nw.length > 1 && nw.every((x) => grams.some((g) => sameName(g, x)));
   };
   const flavors = ((prefs && prefs.flavors) || []).filter(inText);
-  const hits = candidates.filter((it) => inText(it.n) || inText(it.a) || flavors.some((f) => sameName(f, it.n) || (it.a && sameName(f, it.a))));
+  // «Малина», «мята», «печенье», «манго» — это вкусы, а не названия табаков, даже если у какого-то бренда табак так и называется
+  // (Satyr «Raspberries» = «Малина»). Вкус узнаём по тегам справочника. Иначе бот объявляет «нет в наличии: Satyr Mint» на слово «мята».
+  const tags = new Set(candidates.flatMap((it) => [...(it.t || []), ...(it.g || [])]).map((x) => squash(x)));
+  const generic = (it) => tags.has(squash(it.n)) || (!!it.a && tags.has(squash(it.a)));
+  const hits = candidates.filter((it) => !generic(it) && (inText(it.n) || inText(it.a) || flavors.some((f) => sameName(f, it.n) || (it.a && sameName(f, it.a)))));
   // Больше двух обязательных табаков в каждом миксе — уже не микс: оставляем два самых рейтинговых.
   // Один и тот же вкус в разных линейках («Cookie» Medium и «Cookie» Strong) — это один названный табак, а не два:
   // иначе бот ставит в каждый микс оба печенья сразу.
