@@ -68,6 +68,7 @@ export const DEFAULT_TEXTS = {
   strength_3: ['средняя', 'միջին', 'Крепость микса'],
   strength_4: ['средне-крепкая', 'միջին-թունդ', 'Крепость микса'],
   strength_5: ['крепкая', 'թունդ', 'Крепость микса'],
+  no_swear: ['Давай без мата 🙂 Напиши то же самое спокойно — и я подберу миксы.', 'Խնդրում եմ առանց հայհոյանքների 🙂 Գրիր նույնը հանգիստ, և ես միքսեր կընտրեմ։', 'Ответ на сообщение с матом'],
   order_hint: ['🛒 Понравился микс? Нажми на него ниже — откроется чат с менеджером, заказ уже будет вписан.', '🛒 Հավանեցի՞ր միքսը։ Սեղմիր ներքևում՝ կբացվի զրույց մենեջերի հետ, պատվերն արդեն գրված կլինի։',
     'Под последним миксом, над кнопками заказа'],
   order_btn: ['🛒 Заказать: {name}', '🛒 Պատվիրել՝ {name}', 'Кнопка заказа под миксами; {name} — название микса'],
@@ -121,6 +122,7 @@ export const DEFAULT_SETTINGS = [
   { key: 'strong_words', def: 'hard, strong, ligero, zombie, зомби, крепк, хард', type: 'list',
     desc: 'По каким словам в названии линейки или вкуса табак считается крепким. Через запятую.' },
   { key: 'logo_overlay', def: 'да', type: 'yesno', desc: 'Накладывать на картинку готовый логотип (файл src/logo.png) вместо надписи, которую рисует модель (да / нет).' },
+  { key: 'block_swear', def: 'да', type: 'yesno', desc: 'Не обрабатывать сообщения с матом: бот просит написать без ругани (да / нет).' },
   { key: 'strength_memory_hours', def: '3', type: 'int', min: 0, max: 72,
     desc: 'Сколько часов бот помнит выбранную клиентом крепость и не переспрашивает в следующих запросах. 0 — спрашивать каждый раз.' },
   { key: 'only_in_stock', def: 'да', type: 'yesno', desc: 'Только то, что есть на складе (да / нет). Заработает, когда подключим выгрузку склада; до этого — все вкусы наших брендов.' },
@@ -564,7 +566,7 @@ export function tx(cfg, lang = 'ru') {
     tooFew: g('too_few'), failed: g('failed'), more: g('btn_more'), newReq: g('btn_new'),
     strengthLabel: g('strength_label'),
     strengthNames: ['', g('strength_1'), g('strength_2'), g('strength_3'), g('strength_4'), g('strength_5')],
-    gram: g('gram'), packNote: (w) => fill(g('pack_note'), { g: w }), packOne: (w) => fill(g('pack_one'), { g: w }), orderHint: g('order_hint'), orderBtn: (name) => fill(g('order_btn'), { name }), orderText: (name) => fill(g('order_text'), { name }), packMany: (w) => fill(g('pack_many'), { g: w }), bowlNote: (gr) => fill(g('bowl_note'), { g: gr }), footer: g('footer'),
+    gram: g('gram'), packNote: (w) => fill(g('pack_note'), { g: w }), packOne: (w) => fill(g('pack_one'), { g: w }), orderHint: g('order_hint'), noSwear: g('no_swear'), orderBtn: (name) => fill(g('order_btn'), { name }), orderText: (name) => fill(g('order_text'), { name }), packMany: (w) => fill(g('pack_many'), { g: w }), bowlNote: (gr) => fill(g('bowl_note'), { g: gr }), footer: g('footer'),
     llmLang: lang === 'hy' ? 'армянском (восточноармянский литературный, армянским алфавитом)' : 'русском',
   };
 }
@@ -795,6 +797,12 @@ async function onText(env, msg, ctx) {
       username: from.username || '', name: [from.first_name, from.last_name].filter(Boolean).join(' '), text: text.slice(0, 2000) });
   }
 
+  // Мат не обрабатываем: отвечаем сразу, без обращения к ИИ.
+  if (!cmd.startsWith('/') && SWEAR_RE.test(text.toLowerCase().replace(/ё/g, 'е'))) {
+    const cfgS = await loadConfig(env);
+    if (cfgS.settings.block_swear) return send(env, chat, tx(cfgS, detectLang(text) || await getLang(env, chat)).noSwear);
+  }
+
   // Пишет на другом языке — переключаемся на него.
   let lang = await getLang(env, chat);
   const detected = detectLang(text);
@@ -836,7 +844,7 @@ async function onText(env, msg, ctx) {
 }
 
 /** /config — коротко, что сейчас действует. */
-const CODE_VERSION = '12.11 · 14 (логотип меньше, больше ингредиентов вокруг)';
+const CODE_VERSION = '12.11 · 15 (без граммов, без мата, наличие без задержки)';
 export function configSummary(cfg, env = {}, stock = null) {
   const at = cfg._at ? new Date(cfg._at).toLocaleString('ru-RU', { timeZone: 'Europe/Moscow', day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) + ' МСК' : 'ещё не загружалась — работают значения из кода';
   const s = cfg.settings;
@@ -978,7 +986,11 @@ async function makeMixes(env, chat, session, more = false, lang = 'ru', note = '
     const gone = [...new Map(all.filter((x) => !inStock.has(x.k)).map((x) => [x.k, x])).values()];
     const hit = askedKeys(gone, session.prefs, session.text);
     // Тот же вкус есть в наличии в другой линейке — это не «нет в наличии».
-    const sameInStock = (x) => catalog.some((c) => c.b === x.b && similarName(c.n, x.n));
+    // …и если позиция с таким названием лежит на складе, но бот не смог связать её со справочником (см. вкладку «Соответствия»).
+    const stock = await env.KV.get('stock', 'json').catch(() => null);
+    const loose = (stock && stock.unmatched) || [];
+    const sameInStock = (x) => catalog.some((c) => c.b === x.b && similarName(c.n, x.n)) ||
+      loose.some((u) => u.brand === x.b && (similarName(u.flavor, x.n) || (x.a && similarName(u.flavor, x.a))));
     session.missing = gone.filter((x) => hit.has(x.k) && !sameInStock(x)).slice(0, 2).map((x) => ({ name: `${x.b} ${x.n}`, t: x.t, g: x.g }));
     if (session.missing.length) {
       session.prefs = { ...session.prefs,
@@ -1004,7 +1016,7 @@ async function makeMixes(env, chat, session, more = false, lang = 'ru', note = '
   const orders = orderButtons(result, t, cfg.settings.order_contact);
   const gone = !more && (session.missing || []).length ? esc(t.outOfStock(session.missing.map((m) => m.name).join(', '))) + '\n\n' : '';
   const text = gone + result.map((m, i) => renderMix(m, i, t, result.length, bowl)).join('\n\n') +
-    '\n\n<i>' + t.bowlNote(bowl) + '</i>\n' + (orders.length ? t.orderHint : t.footer + (shop ? ' ' + shop : ''));
+    '\n\n' + (orders.length ? t.orderHint : t.footer + (shop ? ' ' + shop : ''));
   // Если Telegram не принял кнопки-ссылки, клиент всё равно получает миксы — с обычными кнопками и ссылкой на магазин.
   const sendMixes = async () => {
     const j = await send(env, chat, text, resultKeyboard(t, orders));
@@ -1243,7 +1255,19 @@ async function composeMixes(env, session, candidates, lang = 'ru', cfg = DEFAULT
  * без повторов табаков между миксами (no_repeats).
  */
 /** Табаки, которые клиент назвал сам («миксы с Кэтминтом»): их ставим во все три микса, повторы для них разрешены. */
-const ASKED_STOP = /^(микс\S{0,3}|mix(es)?|табак\S{0,3}|кальян\S{0,3}|вкус\S{0,3}|чаш\S{0,3}|забив\S{0,3}|собер\S{0,3}|сдела\S{0,3}|хочу|хочется|дай(те)?|нужн\S{0,2}|что|для|или|без|чтобы|какой|какие|есть|можно|пожалуйста|крепк\S{0,3}|легк\S{0,3}|лёгк\S{0,3}|средн\S{0,3})$/i;
+// Мат: по корням, только с начала слова (или после частых приставок), чтобы не задеть «хлеба», «страхую», «употреблять», «мандарин».
+// Текст перед проверкой приводится к нижнему регистру, «ё» заменяется на «е».
+const SW_PRE = '(?:на|по|о|от|за|до|при|не|ни|вы|у|рас|раз|разъ|пере|из|под|подъ|съ|объ|отъ|про|долбо|зло)?';
+export const SWEAR_RE = new RegExp('(?<![а-яa-z])(?:' + [
+  SW_PRE + 'ху[йеяию][а-я]*',
+  '[а-я]{0,5}пизд[а-я]*',
+  'бля(?![а-я])', 'бля[дт][а-я]*',
+  SW_PRE + 'еб(?:ат[а-я]*|ал[а-я]*|ан[а-я]*|ну[а-я]*|ут[а-я]*|ет[а-я]*|уч[а-я]*|ись|ло[а-я]*|ля[а-я]*|ырь[а-я]*|[аыуов]{0,2}(?![а-я]))',
+  'сук[аиуе](?![а-я])', 'сучк[а-я]*', 'сучар[а-я]*',
+  'муд(?:ак|ил|озвон)[а-я]*', 'п[ие]д[оа]р[а-я]*', 'педик[а-я]*', 'гандон[а-я]*', 'шлюх[а-я]*', 'залуп[а-я]*',
+  '(?:blya[a-z]*|suka|pizd[a-z]*|na?hu[iy][a-z]*|ebat[a-z]*|fuck[a-z]*|bitch[a-z]*)(?![a-z])',
+].join('|') + ')', 'i');
+const ASKED_STOP = /^(безаром\S{0,4}|аромк\S{0,3}|аромн\S{0,3}|ароматизирован\S{0,4}|аромат\S{0,3}|no|aroma|noaroma|микс\S{0,3}|mix(es)?|табак\S{0,3}|кальян\S{0,3}|вкус\S{0,3}|чаш\S{0,3}|забив\S{0,3}|собер\S{0,3}|сдела\S{0,3}|хочу|хочется|дай(те)?|нужн\S{0,2}|что|для|или|без|чтобы|какой|какие|есть|можно|пожалуйста|крепк\S{0,3}|легк\S{0,3}|лёгк\S{0,3}|средн\S{0,3})$/i;
 export function askedKeys(candidates, prefs, text = '') {
   // Берём только то, что клиент действительно написал сам: название должно встречаться в его сообщении
   // (с опечатками и транслитом). Иначе ИИ на шаге разбора может «додумать» табаки — и мы заставим ставить их везде.
@@ -1336,11 +1360,10 @@ export function renderMix(m, i, t = 'ru', total = 3, bowl = 20) {
   const parts = m.parts.map((p) => {
     const it = p.item;
     const line = it.l && it.l !== 'Основная' ? ' ' + it.l : '';
-    const g = Math.round((p.p * bowl) / 100 * 2) / 2; // до полуграмма
     // Фасовка из наличия: «пачка 25 г», «пачки 25 / 100 г», а если есть только большая — «только пачка 200 г».
     const w = Array.isArray(it.w) ? [...new Set(it.w)].sort((a, b) => a - b) : [];
     const pack = !w.length ? '' : ` · <i>${esc(w.length > 1 ? t.packMany(w.join(' / ')) : w[0] > 40 ? t.packNote(w[0]) : t.packOne(w[0]))}</i>`;
-    return `${p.p}% · ${String(g).replace('.', ',')} ${t.gram} — <b>${esc(it.n)}</b> · ${esc(it.b + line)}${pack}`;
+    return `${p.p}% — <b>${esc(it.n)}</b> · ${esc(it.b + line)}${pack}`;
   });
   const strength = typeof m.strength === 'number' ? t.strengthNames[m.strength] : m.strength;
   return (
@@ -1551,12 +1574,14 @@ let catCache = { at: 0, sig: '', items: [] };
 async function loadCatalog(env) {
   const cfg = await loadConfig(env);
   const brands = cfg.brands.filter((b) => b.on).map((b) => b.code);
-  const sig = JSON.stringify([brands, cfg.settings.only_in_stock]);
+  // Наличие читаем каждый раз (это одно быстрое чтение): как только склад обновился, список табаков пересобирается сразу,
+  // а не через 10 минут. Раньше из-за этого вернувшийся в наличие табак ещё какое-то время считался отсутствующим.
+  const stock = cfg.settings.only_in_stock ? await env.KV.get('stock', 'json').catch(() => null) : null;
+  const sig = JSON.stringify([brands, cfg.settings.only_in_stock, stock ? stock.hash + '|' + stock.at : '']);
   if (catCache.items.length && catCache.sig === sig && Date.now() - catCache.at < 10 * 60 * 1000) return catCache.items;
   const parts = await Promise.all(brands.map((b) => env.KV.get('cat:' + b, 'json')));
   let items = parts.flatMap((p) => (p && p.items) || []);
-  // Наличие: оставляем только табаки, которые есть на складе, и запоминаем, в каких пачках (w).
-  const stock = cfg.settings.only_in_stock ? await env.KV.get('stock', 'json').catch(() => null) : null;
+  // Оставляем только табаки, которые есть на складе, и запоминаем, в каких пачках (w).
   if (stock && stock.items && Object.keys(stock.items).length >= STOCK_MIN) {
     items = items.filter((x) => stock.items[x.k]).map((x) => ({ ...x, w: stock.items[x.k] }));
   } else {
