@@ -837,6 +837,7 @@ async function onText(env, msg, ctx) {
 }
 
 /** /config — коротко, что сейчас действует. */
+const CODE_VERSION = '12.11 · 4 (строка «нет в наличии» перед миксами)';
 export function configSummary(cfg, env = {}, stock = null) {
   const at = cfg._at ? new Date(cfg._at).toLocaleString('ru-RU', { timeZone: 'Europe/Moscow', day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) + ' МСК' : 'ещё не загружалась — работают значения из кода';
   const s = cfg.settings;
@@ -844,6 +845,7 @@ export function configSummary(cfg, env = {}, stock = null) {
   const on = cfg.brands.filter((b) => b.on);
   const yn = (b) => (b ? 'да' : 'нет');
   return '⚙️ <b>Настройки бота</b>\n' +
+    `Версия кода: ${CODE_VERSION}\n` +
     `Таблица: ${env.CONFIG_SHEET_ID ? `<a href="https://docs.google.com/spreadsheets/d/${env.CONFIG_SHEET_ID}/edit">открыть</a>` : 'не подключена'}\n` +
     `Последнее изменение из таблицы: ${at}\n` +
     `Журнал и чтение таблицы через скрипт Google: ${env.SHEET_SCRIPT_URL ? (env.SHEET_SECRET ? 'подключено' : 'адрес есть, но нет секрета SHEET_SECRET') : 'не подключено (SHEET_SCRIPT_URL пустой)'}\n` +
@@ -950,8 +952,9 @@ async function makeMixes(env, chat, session, more = false, lang = 'ru', note = '
     const inStock = new Set(catalog.map((x) => x.k));
     const gone = [...new Map(all.filter((x) => !inStock.has(x.k)).map((x) => [x.k, x])).values()];
     const hit = askedKeys(gone, session.prefs, session.text);
-    const have = askedKeys(catalog, session.prefs, session.text);
-    session.missing = have.size ? [] : gone.filter((x) => hit.has(x.k)).slice(0, 2).map((x) => ({ name: `${x.b} ${x.n}`, t: x.t, g: x.g }));
+    // Тот же вкус есть в наличии в другой линейке — это не «нет в наличии».
+    const sameInStock = (x) => catalog.some((c) => c.b === x.b && similarName(c.n, x.n));
+    session.missing = gone.filter((x) => hit.has(x.k) && !sameInStock(x)).slice(0, 2).map((x) => ({ name: `${x.b} ${x.n}`, t: x.t, g: x.g }));
     if (session.missing.length) {
       session.prefs = { ...session.prefs,
         like: [...new Set([...(session.prefs.like || []), ...session.missing.flatMap((m) => m.t)])],
@@ -1166,10 +1169,12 @@ async function composeMixes(env, session, candidates, lang = 'ru', cfg = DEFAULT
  * без повторов табаков между миксами (no_repeats).
  */
 /** Табаки, которые клиент назвал сам («миксы с Кэтминтом»): их ставим во все три микса, повторы для них разрешены. */
+const ASKED_STOP = /^(микс\S{0,3}|mix(es)?|табак\S{0,3}|кальян\S{0,3}|вкус\S{0,3}|чаш\S{0,3}|забив\S{0,3}|собер\S{0,3}|сдела\S{0,3}|хочу|хочется|дай(те)?|нужн\S{0,2}|что|для|или|без|чтобы|какой|какие|есть|можно|пожалуйста|крепк\S{0,3}|легк\S{0,3}|лёгк\S{0,3}|средн\S{0,3})$/i;
 export function askedKeys(candidates, prefs, text = '') {
   // Берём только то, что клиент действительно написал сам: название должно встречаться в его сообщении
   // (с опечатками и транслитом). Иначе ИИ на шаге разбора может «додумать» табаки — и мы заставим ставить их везде.
-  const w = String(text).toLowerCase().split(/[^a-zа-яёԱ-֏0-9]+/i).filter((x) => x.length >= 3);
+  // Общие слова запроса — не названия табаков: иначе «миксы» цепляет «Ягодный микс», и бот считает, что клиент назвал его.
+  const w = String(text).toLowerCase().split(/[^a-zа-яёԱ-֏0-9]+/i).filter((x) => x.length >= 3 && !ASKED_STOP.test(x));
   // «с кэтминтом», «с брауни», «манго» — пробуем слово и без падежного окончания
   const bare = (x) => x.replace(/(ами|ями|ом|ем|ой|ей|ою|ах|ях|ов|ев|а|у|ы|и|е|ю|я)$/i, '');
   const grams = [...w, ...w.map(bare).filter((x) => x.length >= 4), ...w.slice(0, -1).map((x, i) => x + ' ' + w[i + 1])];
