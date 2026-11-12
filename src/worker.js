@@ -124,6 +124,7 @@ export const DEFAULT_SETTINGS = [
     desc: 'По каким словам в названии линейки или вкуса табак считается крепким. Через запятую.' },
   { key: 'logo_overlay', def: 'да', type: 'yesno', desc: 'Накладывать на картинку готовый логотип (файл src/logo.png) вместо надписи, которую рисует модель (да / нет).' },
   { key: 'block_swear', def: 'да', type: 'yesno', desc: 'Не обрабатывать сообщения с матом: бот просит написать без ругани (да / нет).' },
+  { key: 'badge_overlay', def: 'да', type: 'yesno', desc: 'Добавлять на картинку значок магазина в левый верхний угол (файл src/badge.png) (да / нет). Работает вместе с logo_overlay.' },
   { key: 'strength_memory_hours', def: '3', type: 'int', min: 0, max: 72,
     desc: 'Сколько часов бот помнит выбранную клиентом крепость и не переспрашивает в следующих запросах. 0 — спрашивать каждый раз.' },
   { key: 'only_in_stock', def: 'да', type: 'yesno', desc: 'Только то, что есть на складе (да / нет). Заработает, когда подключим выгрузку склада; до этого — все вкусы наших брендов.' },
@@ -846,7 +847,7 @@ async function onText(env, msg, ctx) {
 }
 
 /** /config — коротко, что сейчас действует. */
-const CODE_VERSION = '12.11 · 16 (база микса от 50%, логотип выше)';
+const CODE_VERSION = '12.11 · 17 (значок магазина в левом верхнем углу)';
 export function configSummary(cfg, env = {}, stock = null) {
   const at = cfg._at ? new Date(cfg._at).toLocaleString('ru-RU', { timeZone: 'Europe/Moscow', day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) + ' МСК' : 'ещё не загружалась — работают значения из кода';
   const s = cfg.settings;
@@ -1072,7 +1073,7 @@ async function coverImage(env, mixes, cfg) {
   }
   if (photo && logo) {
     try {
-      photo = await drawLogo(env, photo, logo);
+      photo = await drawLogo(env, photo, logo, cfg.settings.badge_overlay ? await badgeBytes(env) : null);
     } catch (e) {
       // Наложение не сработало (например, кончился месячный лимит Cloudflare Images): эта картинка уйдёт без логотипа,
       // а следующие 6 часов логотип снова рисует сама модель.
@@ -1093,16 +1094,26 @@ async function logoBytes(env) {
   }
   return logoCache;
 }
+let badgeCache;
+async function badgeBytes(env) {
+  if (env && env.BADGE_BYTES) return env.BADGE_BYTES; // для тестов
+  if (badgeCache === undefined) {
+    try { const m = await import('./badge.png'); badgeCache = new Uint8Array(m.default); } catch (e) { badgeCache = null; }
+  }
+  return badgeCache;
+}
 const asStream = (bytes) => new Response(bytes).body;
 
 /** Кладёт логотип сверху по центру. Размер и отступ — доли от ширины картинки, поэтому масштаб всегда один. */
-export async function drawLogo(env, photo, logo) {
+export async function drawLogo(env, photo, logo, badge = null) {
   let W = 1024;
   try { const info = await env.IMAGES.info(asStream(photo)); if (info && info.width) W = info.width; } catch (e) { /* размер по умолчанию */ }
   const width = Math.round(W * LOGO_BOX.width);
-  const out = await env.IMAGES.input(asStream(photo))
-    .draw(env.IMAGES.input(asStream(logo)).transform({ width }), { top: Math.round(W * LOGO_BOX.top), left: Math.round((W - width) / 2) })
-    .output({ format: 'image/jpeg', quality: 92 });
+  let chain = env.IMAGES.input(asStream(photo))
+    .draw(env.IMAGES.input(asStream(logo)).transform({ width }), { top: Math.round(W * LOGO_BOX.top), left: Math.round((W - width) / 2) });
+  // Значок магазина — в левый верхний угол, тем же вызовом (в лимит идёт как одна картинка).
+  if (badge) chain = chain.draw(env.IMAGES.input(asStream(badge)).transform({ width: Math.round(W * BADGE_BOX.width) }), { top: Math.round(W * BADGE_BOX.margin), left: Math.round(W * BADGE_BOX.margin) });
+  const out = await chain.output({ format: 'image/jpeg', quality: 92 });
   const bytes = new Uint8Array(await out.response().arrayBuffer());
   if (bytes.length < 1000) throw new Error('пустой ответ сервиса картинок');
   return bytes;
@@ -1522,7 +1533,8 @@ const IMAGE_LABELS = {
 };
 // Место под готовый логотип: сверху по центру. Те же доли использует наложение (LOGO_BOX).
 const LOGO_ZONE = 'IMPORTANT, this overrides anything above: do NOT draw any logo, title, brand name or the words "SIGMA" or "MIX" anywhere. Keep only one small spot at the top center free for a logo that will be added later: the middle 30% of the width, from 2% to 19% of the height (the very top). In that spot the same light background simply continues — no objects and no text there, and do NOT draw any box, panel, frame, card or patch of a different shade: the spot must be invisible, with no visible edges. Everything around that spot must be as rich and dense as the bottom of the picture: fill the top-left and top-right corners with large lush clusters of the fresh ingredients, partially cropped by the frame edges and reaching right up to the sides of the spot, plus the light-grey geometric decorations between them. The three main objects, their flavor labels and all other text must stay entirely below 22% of the height: nothing tall (a glass, a bottle, a flower, a label) may rise into the logo spot. No big empty white areas anywhere, especially not at the top.';
-const LOGO_BOX = { width: 0.235, top: 0.035 }; // доли от ширины картинки
+const LOGO_BOX = { width: 0.235, top: 0.035 };
+const BADGE_BOX = { width: 0.15, margin: 0.02 }; // значок в левом верхнем углу // доли от ширины картинки
 const IMAGE_SAFETY = 'The only text in the image is the "SIGMA MIX" logo: no other words, labels, numbers or percentages. No people, no hands, no hookah, no cigarettes, no smoke.';
 const IMAGE_TEMPLATE = {
   background: 'Square premium advertising poster for flavor mixes, top-down view, light off-white studio background with subtle minimal light-grey geometric decorations: thin outline circles, small solid triangles, plus signs, dashed lines and diagonal hatching',
