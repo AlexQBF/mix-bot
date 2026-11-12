@@ -12,6 +12,16 @@ crons = ["*/15 * * * *", "*/10 3-7 * * 1"]
 [ai]
 binding = "AI"
 
+# Готовый логотип на картинке: файл src/logo.png попадает в бота при сборке,
+# а сервис Cloudflare Images кладёт его поверх картинки (бесплатно до 5000 картинок в месяц).
+[images]
+binding = "IMAGES"
+
+[[rules]]
+type = "Data"
+globs = ["**/*.png"]
+fallthrough = true
+
 # Логи в Cloudflare (Workers & Pages → mix-bot → Logs): видно ошибки, даже если в тот момент никто не смотрел.
 [observability]
 enabled = true
