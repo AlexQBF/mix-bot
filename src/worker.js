@@ -438,16 +438,32 @@ export async function loadConfig(env) {
  * Адрес — SHEET_SCRIPT_URL в wrangler.toml, общий секрет — SHEET_SECRET (секрет в Cloudflare и константа в скрипте).
  */
 async function sheetScript(env, payload, fetcher = fetch) {
-  const r = await fetcher(env.SHEET_SCRIPT_URL, {
-    method: 'POST', redirect: 'follow',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ ...payload, key: env.SHEET_SECRET }),
-  });
-  const text = await r.text();
-  let j;
-  try { j = JSON.parse(text); } catch (e) { throw new Error('скрипт ответил не JSON, код ' + r.status + ': ' + text.slice(0, 120)); }
-  if (!j.ok) throw new Error(j.error || 'ошибка скрипта');
-  return j;
+  // Google время от времени отвечает своей страницей ошибки (500, 502, 524) вместо ответа скрипта — это его сбой, не наш.
+  // Чтение настроек и запись «Соответствий» можно безопасно повторить; журнал не повторяем, чтобы не задвоить строку.
+  const tries = payload.action === 'config' || payload.action === 'match' ? 3 : 1;
+  let last;
+  for (let i = 0; i < tries; i++) {
+    if (i) await sleep(i === 1 ? 2000 : 6000);
+    try {
+      const r = await fetcher(env.SHEET_SCRIPT_URL, {
+        method: 'POST', redirect: 'follow',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ ...payload, key: env.SHEET_SECRET }),
+      });
+      const text = await r.text();
+      let j;
+      try { j = JSON.parse(text); } catch (e) {
+        last = Object.assign(new Error('Google не ответил, код ' + r.status + ': ' + text.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 80)), { transient: true });
+        continue;
+      }
+      if (!j.ok) throw new Error(j.error || 'ошибка скрипта'); // скрипт ответил сам — повторять бессмысленно
+      return j;
+    } catch (e) {
+      if (!e.transient && e.message && !/fetch|network|timeout|abort/i.test(e.message)) throw e;
+      last = Object.assign(e, { transient: true });
+    }
+  }
+  throw last;
 }
 
 const STRENGTH_LOG = { light: 'Лёгко', medium: 'Средне', strong: 'Крепко', any: 'Без разницы' };
@@ -486,6 +502,7 @@ export async function syncConfig(env, fetcher = fetch, withStock = false) {
       if (withStock) stockRows = await fetchStockRows(env, fetcher);
       for (const t of SHEET_TABS) if (Array.isArray(j.tabs && j.tabs[t.name])) tabs[t.name] = j.tabs[t.name].map((r) => r.map((c) => String(c)));
     } catch (e) {
+      if (e.transient) return { ok: false, transient: true, warnings: [], errors: [`Google временно не отдаёт таблицу (${e.message}). Делать ничего не нужно: бот работает на прежних настройках и попробует снова через 15 минут`] };
       return { ok: false, warnings: [], errors: [`не могу прочитать таблицу через скрипт Google (${e.message}). Проверьте, что скрипт развёрнут и секрет в нём совпадает с SHEET_SECRET`] };
     }
   } else {
@@ -648,6 +665,12 @@ export default {
 /** Раз в 15 минут: таблица → копия; новый бренд без вкусов → скачать (по одному за раз). */
 async function cronConfig(env) {
   const r = await syncConfig(env, fetch, true);
+  // Разовый сбой Google — не повод писать админам: молчим, пока таблица не читается три проверки подряд (45 минут).
+  const fails = Number(await env.KV.get('config:fails').catch(() => 0)) || 0;
+  if (!r.ok && r.transient) {
+    await env.KV.put('config:fails', String(fails + 1), { expirationTtl: 6 * 3600 }).catch(() => {});
+    if (fails + 1 < 3) return crawlMissingBrand(env);
+  } else if (fails) await env.KV.delete('config:fails').catch(() => {});
   const statusChanged = await saveStatus(env, r);
   if (!r.ok && statusChanged) await notifyAdmins(env, '⚠️ Автопроверка таблицы.\n' + syncReport(r));
   if (r.ok && (r.changed || statusChanged || (r.stock && r.stock.changed))) await notifyAdmins(env, '🔄 Автопроверка таблицы.\n' + syncReport(r));
@@ -852,7 +875,7 @@ async function onText(env, msg, ctx) {
 }
 
 /** /config — коротко, что сейчас действует. */
-const CODE_VERSION = '12.11 · 21 (вкус — не название табака: без лишнего «нет в наличии»)';
+const CODE_VERSION = '12.11 · 22 (сбои Google: повтор и тишина вместо тревог)';
 export function configSummary(cfg, env = {}, stock = null) {
   const at = cfg._at ? new Date(cfg._at).toLocaleString('ru-RU', { timeZone: 'Europe/Moscow', day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) + ' МСК' : 'ещё не загружалась — работают значения из кода';
   const s = cfg.settings;
@@ -2039,7 +2062,8 @@ export async function syncStock(env, rows, cfg, force = false, matchRows = null)
   // Дешёвая проверка до разбора: та же выгрузка, те же ответы ИИ, тот же день — ничего не делаем.
   const fixes = (matchRows || []).slice(1).filter((r) => r[4]).map((r) => [r[0], r[4]]);
   const hash = quickHash(JSON.stringify(rows || [])) + ':' + Object.keys(map).length + ':' + quickHash(JSON.stringify(fixes)) + ':' + new Date().toISOString().slice(0, 10);
-  if (!force && prev && prev.hash === hash) return { state: 'ok', changed: false, ...stockStats(prev) };
+  // …кроме случая, когда в прошлый раз не удалось записать вкладку «Соответствия»: тогда пробуем ещё раз.
+  if (!force && prev && prev.hash === hash && !prev.tabError) return { state: 'ok', changed: false, ...stockStats(prev) };
   const positions = parseStock(rows);
   if (!positions || !positions.length) {
     if (prev) { await env.KV.delete('stock'); catCache = { at: 0, sig: '', items: [] }; }
@@ -2063,7 +2087,7 @@ export async function syncStock(env, rows, cfg, force = false, matchRows = null)
     if (tabError) {
       console.log('match tab', tabError);
       if (/unknown action|не знает действие/i.test(tabError)) tabError = 'в таблице развёрнута старая версия скрипта Google — обновите его (Управление развертываниями → карандаш → Новая версия)';
-      await reportProblem(env, 'matchtab', '⚠️ Не получилось записать вкладку «Соответствия»: ' + tabError);
+      if (!/^Google не ответил/.test(tabError)) await reportProblem(env, 'matchtab', '⚠️ Не получилось записать вкладку «Соответствия»: ' + tabError);
     }
   }
   catCache = { at: 0, sig: '', items: [] };
