@@ -56,9 +56,6 @@ export const DEFAULT_TEXTS = {
   strength_remembered: ['Крепость — как в прошлый раз: {s}. Захочешь иначе — просто напиши.', 'Թնդությունը՝ նախորդի պես․ {s}։ Եթե ուզում ես այլ կերպ, պարզապես գրիր։',
     'Под «Подбираю миксы…», если бот взял крепость из прошлого запроса'],
   picking_more: ['🔄 Думаю над другими вариантами…', '🔄 Մտածում եմ այլ տարբերակների մասին…', 'После кнопки «Ещё варианты»'],
-  cover: ['Твои {n} микса 👇 слева направо — по порядку', 'Քո {n} միքսերը 👇 ձախից աջ՝ ըստ հերթականության', 'Подпись под картинкой; {n} — сколько миксов'],
-  mix_of: ['Микс {i} из {n}', 'Միքս {i}՝ {n}-ից', 'Над названием микса; {i} — номер, {n} — всего'],
-  best: ['лучшее попадание', 'լավագույն համընկնում', 'Пометка у первого микса'],
   gram: ['г', 'գ', 'Сокращение «грамм» в составе микса'],
   strength_label: ['Крепость:', 'Թնդություն՝', 'Подпись перед крепостью микса'],
   strength_1: ['лёгкая', 'թեթև', 'Крепость микса'],
@@ -93,7 +90,7 @@ export const DEFAULT_TEXTS = {
 
 // Какие тексты показываем в таблице (остальные — служебные, живут в коде, но их тоже можно добавить строкой в таблицу).
 const MAIN_TEXT_KEYS = ['hello', 'choose_lang', 'lang_set', 'ask_strength', 'strength_remembered', 'btn_light', 'btn_medium', 'btn_strong', 'btn_any',
-  'cover', 'mix_of', 'best', 'strength_label', 'bowl_note', 'footer', 'btn_more', 'btn_new', 'description', 'about'];
+  'strength_label', 'bowl_note', 'footer', 'btn_more', 'btn_new', 'description', 'about'];
 
 // Настройки: то, что код гарантирует сам, независимо от ИИ. Видно и меняется в таблице.
 export const DEFAULT_SETTINGS = [
@@ -115,6 +112,8 @@ export const DEFAULT_SETTINGS = [
     desc: 'Сколько часов бот помнит выбранную клиентом крепость и не переспрашивает в следующих запросах. 0 — спрашивать каждый раз.' },
   { key: 'only_in_stock', def: 'да', type: 'yesno', desc: 'Только то, что есть на складе (да / нет). Заработает, когда подключим выгрузку склада; до этого — все вкусы наших брендов.' },
   { key: 'images', def: 'да', type: 'yesno', desc: 'Рисовать картинку к миксам (да / нет). Как она выглядит — во вкладке «Инструкция».' },
+  { key: 'image_first', def: 'нет', type: 'yesno',
+    desc: '«нет» — сначала текст с миксами, картинка приходит следом (клиент не ждёт, пока она рисуется). «да» — сначала картинка, потом текст.' },
   { key: 'shop_url', def: 'https://vektorsigma.am', type: 'text', desc: 'Ссылка на магазин под миксами. Пусто — без ссылки.' },
   { key: 'admins', def: '', type: 'ids', desc: 'Telegram ID админов через запятую: могут /reload и /config и получают уведомления. Свой ID — команда /id у бота.' },
 ];
@@ -147,12 +146,12 @@ export const DEFAULT_INSTRUCTION = [
   'Сначала придумай образ, потом подбери табаки, которые его складывают, — а не наоборот. Образ собирай только из табаков, которые есть в списке; если для образа чего-то не хватает — выбери другой образ, не натягивай.',
   'Хотя бы один из трёх миксов должен удивлять: неожиданное, но логичное сочетание, до которого клиент сам бы не додумался.',
   'Название — это и есть образ: 1–3 слова, сразу рисует картинку и вкус («Виски сауэр», «Малиновый мохито», «Тирамису на террасе», «Пина колада»). Не перечисляй табаки в названии: «Кэтминт с лимоном» — плохо.',
-  'Описание — 1–2 предложения, до 30 слов, на «ты». Чувственно и соблазнительно: какая первая затяжка, текстура, температура, послевкусие. Сочные эпитеты (тягучий, ледяной, бархатный, искрящийся), без воды и канцелярита, без обещаний про здоровье. Описание честно соответствует вкусам в миксе.',
+  'Описание — 2–3 коротких предложения, до 45 слов, на «ты». Пиши чувственно и дерзко, как соблазняешь: что на первой затяжке, как вкус раскрывается дальше, что остаётся на губах. Текстура, температура, послевкусие; сочные эпитеты (тягучий, ледяной, бархатный, искрящийся). Не перечисляй табаки списком и не начинай с «Ты почувствуешь». Без воды, канцелярита и обещаний про здоровье. Описание честно соответствует вкусам в миксе.',
   'Примеры наших описаний: «Яркий гранатовый апероль, сочный апельсин и нежный белый персик создают летний коктейльный вкус с мягкой горчинкой.» «Насыщенная ежевика с винной ноткой сочетается со сливочным черничным йогуртом, а медовый персик делает вкус мягким и округлым.» «Лёгкое игристое вино, сочный манго-ананас и яркая цитрусовая кислинка юдзу создают освежающий тропический вкус.»',
   'КАРТИНКА',
   'Одна квадратная картинка на все три микса, премиальная рекламная фуд-съёмка сверху. Светлый почти белый фон с лёгкой серой геометрией: тонкие круги, треугольники, плюсики, пунктир, штриховка.',
-  'Сверху по центру логотип: слово SIGMA тонкими чёрными буквами, под ним MIX жирными чёрными буквами. Больше никакого текста, цифр и процентов на картинке.',
-  'Под логотипом в один ряд три круга одинакового размера — микс 1, 2, 3 слева направо. Каждый круг — густые глянцевые соусы цвета вкусов микса, перетекающие друг в друга как инь-ян, с капелькой снизу.',
+  'Сверху по центру логотип: слово SIGMA тонкими чёрными буквами, под ним MIX жирными чёрными буквами. Другого текста на картинке нет: ни названий, ни процентов.',
+  'Под логотипом в один ряд три круга одинакового размера — микс 1, 2, 3 слева направо. Каждый круг — густые глянцевые соусы цвета вкусов микса, перетекающие друг в друга как инь-ян, с капелькой снизу. Под каждым кругом по центру — его номер: аккуратная чёрная цифра 1, 2, 3 тем же шрифтом, что MIX, чтобы картинка совпадала с номерами миксов в тексте.',
   'По краям кадра свежие ингредиенты миксов, частично обрезанные краем. Сочные цвета, мягкие тени, много воздуха. Без людей, рук, кальянов, сигарет и дыма.',
   // Этот раздел идёт не миксологу, а на первый шаг — разбор сообщения клиента. Бот находит его по названию.
   'РАЗБОР ЗАПРОСА',
@@ -348,6 +347,7 @@ export function buildConfig(tabs) {
   if (tx) {
     for (const r of tx) {
       const [key, ruT, hyT] = r.c;
+      if (['cover', 'mix_of', 'best'].includes(key)) { warnings.push(`Тексты бота, строка ${r.n}: «${key}» больше не используется — строку можно удалить`); continue; }
       if (!(key in DEFAULT_TEXTS)) { warnings.push(`Тексты бота, строка ${r.n}: неизвестный ключ «${key}» — пропущен`); continue; }
       for (const [lang, val] of [['ru', ruT], ['hy', hyT]]) {
         if (!val) { warnings.push(`Тексты бота, строка ${r.n} (${key}, ${lang === 'ru' ? 'русский' : 'армянский'}): пусто — беру текст по умолчанию`); continue; }
@@ -516,9 +516,9 @@ export function tx(cfg, lang = 'ru') {
     tellFirst: g('tell_first'), noCatalog: g('no_catalog'), picking: g('picking'), pickingMore: g('picking_more'),
     strengthRemembered: (s) => fill(g('strength_remembered'), { s }),
     tooFew: g('too_few'), failed: g('failed'), more: g('btn_more'), newReq: g('btn_new'),
-    mixOf: (i, n) => fill(g('mix_of'), { i, n }), best: g('best'), strengthLabel: g('strength_label'),
+    strengthLabel: g('strength_label'),
     strengthNames: ['', g('strength_1'), g('strength_2'), g('strength_3'), g('strength_4'), g('strength_5')],
-    gram: g('gram'), cover: (n) => fill(g('cover'), { n }), bowlNote: (gr) => fill(g('bowl_note'), { g: gr }), footer: g('footer'),
+    gram: g('gram'), bowlNote: (gr) => fill(g('bowl_note'), { g: gr }), footer: g('footer'),
     llmLang: lang === 'hy' ? 'армянском (восточноармянский литературный, армянским алфавитом)' : 'русском',
   };
 }
@@ -844,19 +844,18 @@ async function makeMixes(env, chat, session, more = false, lang = 'ru', note = '
   await putSession(env, chat, session);
 
   const bowl = cfg.settings.bowl_grams;
-  const blocks = result.map((m, i) => renderMix(m, i, t, result.length, bowl));
   const shop = cfg.settings.shop_url;
-  blocks[blocks.length - 1] += '\n\n<i>' + t.bowlNote(bowl) + '</i>\n' + t.footer + (shop ? ' ' + shop : '');
-
-  // Сначала одна общая картинка со всеми миксами, потом карточки миксов текстом.
-  if (cfg.settings.images) {
+  const text = result.map((m, i) => renderMix(m, i, t, result.length, bowl)).join('\n\n') +
+    '\n\n<i>' + t.bowlNote(bowl) + '</i>\n' + t.footer + (shop ? ' ' + shop : '');
+  const picture = async () => {
+    if (!cfg.settings.images) return;
     await action(env, chat, 'upload_photo');
     const photo = await coverImage(env, result, cfg);
-    if (photo) await sendPhoto(env, chat, photo, t.cover(result.length));
-  }
-  for (let i = 0; i < blocks.length; i++) {
-    await send(env, chat, blocks[i], i === blocks.length - 1 ? resultKeyboard(t) : undefined);
-  }
+    if (photo) await sendPhoto(env, chat, photo, '');
+  };
+  if (cfg.settings.image_first) await picture();
+  await send(env, chat, text, resultKeyboard(t));
+  if (!cfg.settings.image_first) await picture();
 }
 
 /** Общая картинка: две попытки основной моделью, потом запасная. */
@@ -1058,7 +1057,7 @@ export function validateMixes(out, candidates, cfg = DEFAULTS, asked = new Set()
     const sNum = Math.round(Number(m.strength));
     res.push({
       title: String(m.title || 'Микс').slice(0, 60),
-      text: String(m.text || '').slice(0, 500),
+      text: String(m.text || '').slice(0, 700),
       // Крепость — от ИИ (он знает поправки из инструкции); если не дал — считаем по табакам.
       strength: sNum >= 1 && sNum <= 5 ? sNum : mixStrength(parts, st.strong_words),
       garnish: typeof m.garnish === 'string' ? m.garnish.slice(0, 200) : '',
@@ -1090,21 +1089,17 @@ export function mixStrength(parts, words) {
  */
 export function renderMix(m, i, t = 'ru', total = 3, bowl = 20) {
   if (typeof t === 'string') t = tx(DEFAULTS, t);
-  const label = t.mixOf(i + 1, total) + (i === 0 ? ' · ' + t.best : '');
   const parts = m.parts.map((p) => {
     const it = p.item;
     const line = it.l && it.l !== 'Основная' ? ' ' + it.l : '';
-    // Русское название показываем, только если оно добавляет смысл (2+ слова), а не просто перевод.
-    const alt = it.a && /[а-яё]/i.test(it.a) && !/[а-яё]/i.test(it.n) && it.a.trim().split(/\s+/).length > 1 ? ' (' + esc(it.a) + ')' : '';
     const g = Math.round((p.p * bowl) / 100 * 2) / 2; // до полуграмма
-    return `${esc(it.b + line)} · <b>${esc(it.n)}</b>${alt} — ${p.p}% · ${String(g).replace('.', ',')} ${t.gram}`;
+    return `${p.p}% · ${String(g).replace('.', ',')} ${t.gram} — <b>${esc(it.n)}</b> · ${esc(it.b + line)}`;
   });
   const strength = typeof m.strength === 'number' ? t.strengthNames[m.strength] : m.strength;
   return (
-    `<i>${label}</i>\n` +
-    `<b>${esc(m.title.toLocaleUpperCase(t.lang === 'hy' ? 'hy' : 'ru'))}</b>\n\n` +
-    `<blockquote>${parts.join('\n')}</blockquote>\n` +
-    (m.text ? esc(m.text) + '\n' : '') +
+    `<b>${i + 1} · ${esc(m.title.toLocaleUpperCase(t.lang === 'hy' ? 'hy' : 'ru'))}</b>\n` +
+    (m.text ? `<i>${esc(m.text)}</i>\n` : '') +
+    `<blockquote>${parts.join('\n')}</blockquote>` +
     (strength ? '\n' + t.strengthLabel + ' ' + esc(strength) : '')
   ).trim();
 }
@@ -1227,11 +1222,11 @@ export function parseJson(text) {
  * Обычно задание для картинки пишет ИИ по разделу «КАРТИНКА» из инструкции.
  * Этот шаблон — запасной, если ИИ задание не вернул. К любому заданию добавляется IMAGE_SAFETY.
  */
-const IMAGE_SAFETY = 'The only text in the image is the "SIGMA MIX" logo: no other words, labels, numbers or percentages. No people, no hands, no hookah, no cigarettes, no smoke.';
+const IMAGE_SAFETY = 'The only text in the image is the "SIGMA MIX" logo and one small bold black digit centered under each swirl (1, 2, 3 from left to right): no other words, labels, numbers or percentages. No people, no hands, no hookah, no cigarettes, no smoke.';
 const IMAGE_TEMPLATE = {
   background: 'Square premium advertising poster for flavor mixes, top-down view, light off-white studio background with subtle minimal light-grey geometric decorations: thin outline circles, small solid triangles, plus signs, dashed lines and diagonal hatching',
   logo: 'At the top center, a modern logo: the word "SIGMA" in thin black sans-serif capitals, directly below it the word "MIX" in heavy bold black sans-serif capitals',
-  layout: 'Below the logo, {count} separate round swirls of the same size arranged in one horizontal row from left to right, evenly spaced',
+  layout: 'Below the logo, {count} separate round swirls of the same size arranged in one horizontal row from left to right, evenly spaced, each with a small bold black digit centered below it, numbered 1, 2, 3 from left to right',
   swirl: 'Each swirl is made of thick glossy liquid sauces flowing into each other like a yin-yang, with clear borders between colors, realistic shiny reflections and one small drip at the bottom edge',
   garnish: 'Fresh ingredients scattered around the edges of the frame, partially cropped',
   quality: 'High-end commercial food photography, soft natural shadows, vibrant saturated colors, crisp focus, clean balanced composition, lots of white space',
