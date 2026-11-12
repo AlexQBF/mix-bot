@@ -760,7 +760,7 @@ async function onText(env, msg, ctx) {
       const hit = all.filter((x) => { const hay = squash(x.b + ' ' + x.l + ' ' + x.n + ' ' + x.a); return q.every((w) => hay.includes(w)); });
       const lines = [...new Set(all.filter((x) => q.some((w) => squash(x.b).includes(w))).map((x) => x.b + ' · ' + (x.l || '—')))];
       return send(env, chat, esc(`В справочнике всего ${all.length} табаков. Найдено: ${hit.length}\n` +
-        hit.slice(0, 40).map((x) => `${stock && stock.items && stock.items[x.k] ? '✅' : '▫️'} ${x.b} · ${x.l || '—'} · ${x.n}${x.a ? ' (' + x.a + ')' : ''}`).join('\n') +
+        hit.slice(0, 40).map((x) => `${stock && stock.items && stock.items[x.k] ? '✅' : '▫️'} ${x.b} · ${x.l || '—'} · ${x.n}${x.a ? ' (' + x.a + ')' : ''}${x.d ? ' — снят с производства' : ''}`).join('\n') +
         (lines.length ? '\n\nЛинейки в справочнике: ' + lines.join('; ') : '')).slice(0, 4000));
     }
     if (cmd === '/stock') {
@@ -1447,6 +1447,8 @@ async function loadCatalog(env) {
   const stock = cfg.settings.only_in_stock ? await env.KV.get('stock', 'json').catch(() => null) : null;
   if (stock && stock.items && Object.keys(stock.items).length >= STOCK_MIN) {
     items = items.filter((x) => stock.items[x.k]).map((x) => ({ ...x, w: stock.items[x.k] }));
+  } else {
+    items = items.filter((x) => !x.d); // без склада снятые с производства не предлагаем
   }
   catCache = { at: Date.now(), sig, items };
   return items;
@@ -1496,7 +1498,7 @@ export async function crawlBrand(env, slug, fetcher = fetch, waits) {
   if (!items.length) throw new Error(`${slug}: пустой список, старые данные не трогаю`);
   await env.KV.put('cat:' + slug, JSON.stringify({ updated: new Date().toISOString(), total: raw.length, items }));
   catCache = { at: 0, sig: '', items: [] };
-  return { slug, total: raw.length, active: items.length };
+  return { slug, total: raw.length, active: items.filter((x) => !x.d).length };
 }
 
 /** Сырые записи сайта → компактные записи справочника. Снятые с производства выкидываем. */
@@ -1506,7 +1508,8 @@ export function toItems(raw) {
   for (const x of raw) {
     if (!x || !x.name || seen.has(x.slug)) continue;
     seen.add(x.slug);
-    if (/снят/i.test(x.status || '')) continue;
+    // Снятые с производства оставляем с пометкой d: в подбор они идут, только если реально лежат у нас на складе.
+    const gone = /снят/i.test(x.status || '');
     const tags = Array.isArray(x.tags) ? x.tags : [];
     items.push({
       k: x.slug,                                     // ключ: brand/line/flavor
@@ -1519,6 +1522,7 @@ export function toItems(raw) {
       c: parseInt(x.ratings_count, 10) || 0,
       t: [...new Set(tags.map((t) => t.name).filter(Boolean))],
       g: [...new Set(tags.map((t) => t.group).filter(Boolean))],
+      ...(gone ? { d: 1 } : {}),
     });
   }
   return items;
