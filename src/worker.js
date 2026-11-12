@@ -1462,7 +1462,8 @@ async function loadCatalog(env) {
 async function fetchRetry(fetcher, url, opts, waits = [3000, 8000, 15000]) {
   for (let i = 0; ; i++) {
     let r;
-    try { r = await fetcher(url, opts); } catch (e) { if (i >= waits.length) throw e; }
+    // Сайт иногда «зависает» и не отвечает вовсе — ждём не больше 20 секунд на попытку.
+    try { r = await fetcher(url, { ...opts, signal: AbortSignal.timeout(20000) }); } catch (e) { if (i >= waits.length) throw new Error('сайт не ответил за 20 секунд'); }
     if (r && (r.ok || (r.status < 500 && r.status !== 429))) return r;
     if (i >= waits.length) return r;
     await new Promise((res) => setTimeout(res, waits[i]));
