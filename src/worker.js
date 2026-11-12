@@ -69,8 +69,11 @@ export const DEFAULT_TEXTS = {
   strength_4: ['средне-крепкая', 'միջին-թունդ', 'Крепость микса'],
   strength_5: ['крепкая', 'թունդ', 'Крепость микса'],
   no_swear: ['Давай без мата 🙂 Напиши то же самое спокойно — и я подберу миксы.', 'Խնդրում եմ առանց հայհոյանքների 🙂 Գրիր նույնը հանգիստ, և ես միքսեր կընտրեմ։', 'Ответ на сообщение с матом'],
-  order_hint: ['🛒 Понравился микс? Нажми на него ниже — откроется чат с менеджером, заказ уже будет вписан.', '🛒 Հավանեցի՞ր միքսը։ Սեղմիր ներքևում՝ կբացվի զրույց մենեջերի հետ, պատվերն արդեն գրված կլինի։',
+  order_hint: ['🛒 Понравился микс? Нажми на него ниже — подготовлю сообщение менеджеру.', '🛒 Հավանեցի՞ր միքսը։ Սեղմիր ներքևում՝ կպատրաստեմ հաղորդագրություն մենեջերին։',
     'Под последним миксом, над кнопками заказа'],
+  order_ready: ['Заказ на «{name}» готов. Нажми кнопку — откроется чат с менеджером, текст уже вписан, останется отправить 👇', '«{name}» պատվերը պատրաստ է։ Սեղմիր կոճակը՝ կբացվի զրույց մենեջերի հետ, տեքստն արդեն գրված է, մնում է ուղարկել 👇',
+    'Ответ после нажатия «Заказать»'],
+  order_open: ['✍️ Написать менеджеру', '✍️ Գրել մենեջերին', 'Кнопка, которая открывает чат с менеджером'],
   order_btn: ['🛒 Заказать: {name}', '🛒 Պատվիրել՝ {name}', 'Кнопка заказа под миксами; {name} — название микса'],
   order_text: ['Здравствуйте! Хочу заказать табаки для микса «{name}»:', 'Բարև Ձեզ։ Ուզում եմ պատվիրել ծխախոտներ «{name}» միքսի համար․', 'Первая строка готового сообщения менеджеру'],
   pack_one: ['пачка {g} г', '{g} գ տուփ', 'Пометка у табака: в какой пачке он есть; {g} — вес пачки'],
@@ -569,7 +572,7 @@ export function tx(cfg, lang = 'ru') {
     tooFew: g('too_few'), failed: g('failed'), more: g('btn_more'), newReq: g('btn_new'),
     strengthLabel: g('strength_label'),
     strengthNames: ['', g('strength_1'), g('strength_2'), g('strength_3'), g('strength_4'), g('strength_5')],
-    gram: g('gram'), packNote: (w) => fill(g('pack_note'), { g: w }), packOne: (w) => fill(g('pack_one'), { g: w }), orderHint: g('order_hint'), noSwear: g('no_swear'), orderBtn: (name) => fill(g('order_btn'), { name }), orderText: (name) => fill(g('order_text'), { name }), packMany: (w) => fill(g('pack_many'), { g: w }), bowlNote: (gr) => fill(g('bowl_note'), { g: gr }), footer: g('footer'),
+    gram: g('gram'), packNote: (w) => fill(g('pack_note'), { g: w }), packOne: (w) => fill(g('pack_one'), { g: w }), orderHint: g('order_hint'), orderReady: (name) => fill(g('order_ready'), { name }), orderOpen: g('order_open'), noSwear: g('no_swear'), orderBtn: (name) => fill(g('order_btn'), { name }), orderText: (name) => fill(g('order_text'), { name }), packMany: (w) => fill(g('pack_many'), { g: w }), bowlNote: (gr) => fill(g('bowl_note'), { g: gr }), footer: g('footer'),
     llmLang: lang === 'hy' ? 'армянском (восточноармянский литературный, армянским алфавитом)' : 'русском',
   };
 }
@@ -847,7 +850,7 @@ async function onText(env, msg, ctx) {
 }
 
 /** /config — коротко, что сейчас действует. */
-const CODE_VERSION = '12.11 · 17 (значок магазина в левом верхнем углу)';
+const CODE_VERSION = '12.11 · 18 (нажатие «Заказать» в журнале, ответ ИИ строго JSON)';
 export function configSummary(cfg, env = {}, stock = null) {
   const at = cfg._at ? new Date(cfg._at).toLocaleString('ru-RU', { timeZone: 'Europe/Moscow', day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) + ' МСК' : 'ещё не загружалась — работают значения из кода';
   const s = cfg.settings;
@@ -905,6 +908,15 @@ async function onCallback(env, cq, ctx) {
     await logToSheet(env, ctx, { action: 'strength', userId: (cq.from && cq.from.id) || chat, strength: STRENGTH_LOG[session.prefs.strength] || session.prefs.strength });
     return makeMixes(env, chat, { text: session.text, prefs: session.prefs, used: [], titles: [] }, false, lang);
   }
+  if (data.startsWith('ord:')) {
+    // Клиент нажал «Заказать»: отмечаем в журнале и даём кнопку, которая открывает чат с менеджером с готовым текстом.
+    const o = (session.orders || [])[Number(data.slice(4))];
+    if (!o) return send(env, chat, t.expired);
+    await logToSheet(env, ctx, { action: 'order', userId: (cq.from && cq.from.id) || chat, mix: o.title });
+    const j = await send(env, chat, esc(t.orderReady(o.title)), { inline_keyboard: [[{ text: t.orderOpen, url: o.url }]] });
+    if (j && j.ok === false) { const c2 = await loadConfig(env); await send(env, chat, t.footer + (c2.settings.shop_url ? ' ' + c2.settings.shop_url : '')); }
+    return;
+  }
   if (data === 'more') {
     if (!session.prefs || session.stage === 'ask_strength') return send(env, chat, t.tellFirst);
     return makeMixes(env, chat, session, true, lang);
@@ -922,7 +934,7 @@ function strengthKeyboard(t) {
 
 function resultKeyboard(t, orders = []) {
   return { inline_keyboard: [
-    ...orders.map((o) => [{ text: o.text, url: o.url }]),
+    ...orders.map((o, i) => [{ text: o.text, callback_data: 'ord:' + i }]),
     [{ text: t.more, callback_data: 'more' }, { text: t.newReq, callback_data: 'new' }],
   ] };
 }
@@ -942,11 +954,11 @@ export function orderButtons(mixes, t, contact) {
       const ln = full && it.l && it.l !== 'Основная' ? ' ' + it.l : '';
       return `— ${it.n} · ${it.b}${ln}` + (w ? `, ${t.packOne(w)}` : '');
     };
-    const link = (full) => `https://t.me/${user}?text=` + encodeURIComponent(t.orderText(title) + '\n' + m.parts.map((p) => line(p, full)).join('\n'));
+    const link = (full) => `https://t.me/${user}?text=` + encodeURIComponent(t.orderText(title) + '\n\n' + m.parts.map((p) => line(p, full)).join('\n'));
     let url = link(true);
     if (url.length > 1900) url = link(false); // слишком длинная ссылка — без названий линеек
     if (url.length > 1900) url = `https://t.me/${user}?text=` + encodeURIComponent(t.orderText(title));
-    return { text: t.orderBtn(title).slice(0, 60), url };
+    return { text: t.orderBtn(title).slice(0, 60), url, title };
   });
 }
 
@@ -1011,20 +1023,18 @@ async function makeMixes(env, chat, session, more = false, lang = 'ru', note = '
   session.stage = 'done';
   session.used = [...(session.used || []), ...result.flatMap((m) => m.parts.map((p) => p.item.k))].slice(-80);
   session.titles = [...(session.titles || []), ...result.map((m) => m.title)].slice(-15);
+  // Кнопки «Заказать»: сами ссылки с текстом заказа храним в диалоге — бот отдаёт их по нажатию и отмечает нажатие в журнале.
+  const orders = orderButtons(result, t, cfg.settings.order_contact);
+  session.orders = orders.map((o) => ({ title: o.title, url: o.url }));
   await putSession(env, chat, session);
 
   const bowl = cfg.settings.bowl_grams;
   const shop = cfg.settings.shop_url;
   // Одной строкой перед миксами: чего нет в наличии. Дальше миксы как обычно, без оговорок в описаниях.
-  const orders = orderButtons(result, t, cfg.settings.order_contact);
   const gone = !more && (session.missing || []).length ? esc(t.outOfStock(session.missing.map((m) => m.name).join(', '))) + '\n\n' : '';
   const text = gone + result.map((m, i) => renderMix(m, i, t, result.length, bowl)).join('\n\n') +
     '\n\n' + (orders.length ? t.orderHint : t.footer + (shop ? ' ' + shop : ''));
-  // Если Telegram не принял кнопки-ссылки, клиент всё равно получает миксы — с обычными кнопками и ссылкой на магазин.
-  const sendMixes = async () => {
-    const j = await send(env, chat, text, resultKeyboard(t, orders));
-    if (orders.length && j && j.ok === false) await send(env, chat, text.replace(t.orderHint, t.footer + (shop ? ' ' + shop : '')), resultKeyboard(t));
-  };
+  const sendMixes = () => send(env, chat, text, resultKeyboard(t, orders));
   if (cfg.settings.images && cfg.settings.image_first) {
     // Вместе: «загрузка» крутится, пока рисуется картинка, потом сразу картинка и текст.
     const photo = await coverImage(env, result, cfg);
@@ -1417,7 +1427,7 @@ export function renderMix(m, i, t = 'ru', total = 3, bowl = 20) {
  *   anthropic  — Claude (нужен секрет LLM_API_KEY)
  *   openai     — OpenAI и любые совместимые сервисы (LLM_API_KEY, при необходимости LLM_BASE_URL)
  */
-async function llm(env, system, user, maxTokens) {
+async function llm(env, system, user, maxTokens, json = false) {
   const provider = env.LLM_PROVIDER || 'cloudflare';
   const model = env.LLM_MODEL || '@cf/meta/llama-3.3-70b-instruct-fp8-fast';
   const messages = [{ role: 'system', content: system }, { role: 'user', content: user }];
@@ -1441,17 +1451,21 @@ async function llm(env, system, user, maxTokens) {
   }
   if (provider === 'openai' && !env.LLM_BASE_URL) {
     // Модели GPT-6 «думают» перед ответом: effort — сколько. low — хороший баланс для миксов, none — для простого разбора.
-    const call = async (effort) => {
+    // strict — просим у OpenAI ответ строго в виде JSON: тогда он не может прислать «почти JSON» с лишней кавычкой или оборванный.
+    const call = async (effort, strict = json) => {
       const r = await fetch('https://api.openai.com/v1/responses', {
         method: 'POST',
         headers: { authorization: 'Bearer ' + env.LLM_API_KEY, 'content-type': 'application/json' },
         body: JSON.stringify({ model, instructions: system, input: user, reasoning: { effort },
+          ...(strict ? { text: { format: { type: 'json_object' } } } : {}),
           max_output_tokens: maxTokens + (effort === 'none' ? 0 : 6000) }),
       });
       return { r, j: await r.json().catch(() => ({})) };
     };
     const effort = env.LLM_EFFORT || env.OPENAI_EFFORT || 'low';
     let { r, j } = await call(effort);
+    // Модель не приняла режим JSON — повторяем как раньше, без него.
+    if (!r.ok && json && /format|json_object|text\./i.test(JSON.stringify(j))) ({ r, j } = await call(effort, false));
     // Модель не умеет effort=none (например, GPT-6.1 Sol) — повторяем с low.
     if (!r.ok && effort === 'none' && /effort|reasoning/i.test(JSON.stringify(j))) ({ r, j } = await call('low'));
     if (!r.ok) throw new Error('openai ' + r.status + ' ' + JSON.stringify(j).slice(0, 400));
@@ -1479,7 +1493,7 @@ async function llmJson(env, system, user, maxTokens) {
   const who = `${env.LLM_PROVIDER || 'cloudflare'} · ${env.LLM_MODEL || 'llama'}`;
   let text;
   try {
-    text = await llm(env, system, user, maxTokens);
+    text = await llm(env, system, user, maxTokens, true);
   } catch (e) {
     console.log('llm', e.message);
     const canFallback = (env.LLM_PROVIDER || 'cloudflare') !== 'cloudflare' && env.AI;
@@ -1496,7 +1510,7 @@ async function llmJson(env, system, user, maxTokens) {
   const json = parseJson(text);
   if (!json) {
     console.log('llm bad json', String(text).slice(0, 500));
-    await reportProblem(env, 'llmjson', `⚠️ ИИ ответил не в том формате (${who}). Начало ответа:\n${String(text).slice(0, 400)}`);
+    await reportProblem(env, 'llmjson', `⚠️ ИИ ответил не в том формате (${who}), длина ответа ${String(text).length} зн. Обычно бот сразу спрашивает ещё раз, и клиент миксы получает.\nНачало:\n${String(text).slice(0, 250)}\n…\nКонец:\n${String(text).slice(-200)}`);
   }
   return json;
 }
