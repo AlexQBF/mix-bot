@@ -850,7 +850,7 @@ async function onText(env, msg, ctx) {
 }
 
 /** /config — коротко, что сейчас действует. */
-const CODE_VERSION = '12.11 · 18 (нажатие «Заказать» в журнале, ответ ИИ строго JSON)';
+const CODE_VERSION = '12.11 · 19 (один вкус — один раз в миксе)';
 export function configSummary(cfg, env = {}, stock = null) {
   const at = cfg._at ? new Date(cfg._at).toLocaleString('ru-RU', { timeZone: 'Europe/Moscow', day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) + ' МСК' : 'ещё не загружалась — работают значения из кода';
   const s = cfg.settings;
@@ -1311,7 +1311,11 @@ export function askedKeys(candidates, prefs, text = '') {
   const flavors = ((prefs && prefs.flavors) || []).filter(inText);
   const hits = candidates.filter((it) => inText(it.n) || inText(it.a) || flavors.some((f) => sameName(f, it.n) || (it.a && sameName(f, it.a))));
   // Больше двух обязательных табаков в каждом миксе — уже не микс: оставляем два самых рейтинговых.
-  return new Set(hits.sort((x, y) => (y.r || 0) - (x.r || 0)).slice(0, 2).map((it) => it.k));
+  // Один и тот же вкус в разных линейках («Cookie» Medium и «Cookie» Strong) — это один названный табак, а не два:
+  // иначе бот ставит в каждый микс оба печенья сразу.
+  const byName = new Set();
+  const uniq = hits.sort((x, y) => (y.r || 0) - (x.r || 0)).filter((it) => { const q = squash(it.n); return !byName.has(q) && byName.add(q); });
+  return new Set(uniq.slice(0, 2).map((it) => it.k));
 }
 
 /**
@@ -1344,8 +1348,15 @@ export function validateMixes(out, candidates, cfg = DEFAULTS, asked = new Set()
     let parts = (Array.isArray(m.parts) ? m.parts : [])
       .map((p) => ({ item: candidates[Number(String(p.n).replace(/\D/g, '')) - 1], p: Number(p.p), look: typeof p.look === 'string' ? p.look.slice(0, 80) : '' }))
       .filter((p) => p.item && p.p > 0 && !seen.has(p.item.k) && seen.add(p.item.k))
-      .sort((a, b) => b.p - a.p)
-      .slice(0, st.max_tobaccos);
+      .sort((a, b) => b.p - a.p);
+    // Два табака с одним и тем же названием вкуса в одном миксе (Cookie + Cookie из другой линейки) — оставляем один:
+    // названный клиентом, а если такого нет — тот, у которого доля больше. Его доля прибавляется к оставшемуся.
+    const names = new Map();
+    for (const p of [...parts].sort((a, b) => (asked.has(b.item.k) ? 1 : 0) - (asked.has(a.item.k) ? 1 : 0) || b.p - a.p)) {
+      const q = squash(p.item.n);
+      if (names.has(q)) { names.get(q).p += p.p; p.p = 0; } else names.set(q, p);
+    }
+    parts = parts.filter((p) => p.p > 0).sort((a, b) => b.p - a.p).slice(0, st.max_tobaccos);
     // Табак уже был в предыдущем миксе — убираем повтор, если без него в миксе остаётся минимум табаков.
     if (st.no_repeats) {
       const fresh = parts.filter((p) => !usedAll.has(p.item.k) || asked.has(p.item.k));
