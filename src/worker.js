@@ -117,6 +117,7 @@ export const DEFAULT_SETTINGS = [
   { key: 'min_tobaccos', def: '2', type: 'int', min: 2, max: 6, desc: 'Минимум табаков в одном миксе.' },
   { key: 'max_tobaccos', def: '4', type: 'int', min: 2, max: 6, desc: 'Максимум табаков в одном миксе.' },
   { key: 'share_step', def: '5', type: 'int', min: 1, max: 25, desc: 'Доли в миксе кратны этому числу, %. Сумма долей всегда 100%.' },
+  { key: 'base_share', def: '50', type: 'int', min: 0, max: 90, desc: 'База микса: доля главного табака не меньше этого числа, %. Остальные табаки — дополнения к базе. 0 — без правила.' },
   { key: 'no_repeats', def: 'да', type: 'yesno', desc: 'Один табак — только в одном миксе из трёх (да / нет).' },
   { key: 'strong_only_on_request', def: 'да', type: 'yesno', desc: 'Крепкие табаки и крепкие линейки — только если клиент сам попросил крепко (да / нет).' },
   { key: 'strong_words', def: 'hard, strong, ligero, zombie, зомби, крепк, хард', type: 'list',
@@ -155,6 +156,7 @@ export const DEFAULT_INSTRUCTION = [
   'Все три микса должны отвечать на запрос. Если клиент просит миксы с конкретным вкусом или табаком («миксы с Кэтминтом», «что-нибудь с манго») — он есть в каждом из трёх миксов, а отличаются они сочетаниями вокруг него. Первый — самое точное попадание, второй и третий — другие по характеру, чтобы было из чего выбрать.',
   'Микс не должен быть однобоким. Если основа сладкая (десерт, сливки, шоколад, выпечка, орехи, карамель) — обязательно оттени её кислинкой, цитрусом или свежестью на 15–25%. Три десерта в одном миксе — нельзя, если клиент прямо не просил «чистый десерт».',
   'Яркие вкусы забивают остальные: гуава, мята, холодок, корица, кардамон, гвоздика, кофе, роза, лаванда, хвоя, эвкалипт, табак, сигара. Давай их только акцентом — до 20%, если клиент сам не просил именно этот вкус.',
+  'У каждого микса есть база — один главный вкус, который занимает половину чаши или больше. Сначала выбери базу, потом добавь к ней один-три вкуса, которые с ней дружат: подчёркивают её, оттеняют кислинкой или свежестью, добавляют глубину. Добавки не должны спорить с базой и перебивать её.',
   'Не ставь в один микс два почти одинаковых вкуса (две мяты, две малины), если клиент не просил усилить именно его.',
   'Необычные и гастрономические вкусы (сыр, бекон, мясо, рыба, чеснок, грибы, томат, кактус и подобные) бери, только если клиент сам просит что-то странное, дикое, несъедобное или прямо называет такой вкус. На обычный запрос (ягоды, фрукты, свежесть, десерты, «удиви меня») такие табаки не ставь: удивлять нужно сочетанием привычных вкусов, а не едой.',
   'КРЕПОСТЬ',
@@ -844,7 +846,7 @@ async function onText(env, msg, ctx) {
 }
 
 /** /config — коротко, что сейчас действует. */
-const CODE_VERSION = '12.11 · 15 (без граммов, без мата, наличие без задержки)';
+const CODE_VERSION = '12.11 · 16 (база микса от 50%, логотип выше)';
 export function configSummary(cfg, env = {}, stock = null) {
   const at = cfg._at ? new Date(cfg._at).toLocaleString('ru-RU', { timeZone: 'Europe/Moscow', day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) + ' МСК' : 'ещё не загружалась — работают значения из кода';
   const s = cfg.settings;
@@ -1207,6 +1209,7 @@ export function composePrompt(cfg, lang = 'ru') {
     '- Собери ровно 3 микса ТОЛЬКО из табаков списка. Формат строки списка: номер|табак|крепость по htreviews|рейтинг|вкусы [группы].\n' +
     '- Никогда не возвращай пустой список миксов и не проси что-то добавить. Если табака или вкуса, который назвал клиент, в списке нет — подбери самое близкое по вкусу из списка.\n' +
     `- В миксе от ${st.min_tobaccos} до ${st.max_tobaccos} табаков, доли — целые числа, кратные ${st.share_step}, в сумме ровно 100.\n` +
+    (st.base_share ? `- В каждом миксе один табак — база: его доля не меньше ${st.base_share}%. Остальные табаки — дополнения к базе: подбирай их под её вкус, чтобы они подчёркивали или оттеняли базу, а не спорили с ней.\n` : '') +
     (st.no_repeats ? '- Каждый табак — только в одном из трёх миксов (кроме отмеченных ★).\n' : '') +
     '- Табаки с пометкой ★ клиент назвал сам: такой табак должен быть в КАЖДОМ из трёх миксов, в разных сочетаниях.\n' +
     '- title и text пиши на ' + t.llmLang + ' языке. Названия брендов и табаков не переводи.\n' +
@@ -1290,6 +1293,25 @@ export function askedKeys(candidates, prefs, text = '') {
   return new Set(hits.sort((x, y) => (y.r || 0) - (x.r || 0)).slice(0, 2).map((it) => it.k));
 }
 
+/**
+ * База микса: главный табак занимает не меньше base %. Если ИИ дал меньше — ужимаем остальные пропорционально
+ * (каждый не меньше одного шага), а если и так не помещаются — убираем самые маленькие добавки.
+ */
+export function withBase(parts, base, step, minParts = 2) {
+  if (!base || parts.length < 2 || parts[0].p >= base) return parts;
+  const need = Math.ceil(base / step) * step;
+  let rest = parts.slice(1);
+  while (rest.length > Math.max(1, minParts - 1) && rest.length * step > 100 - need) rest = rest.slice(0, -1);
+  const room = Math.max(rest.length * step, 100 - need);
+  const sum = rest.reduce((a, p) => a + p.p, 0);
+  const exact = rest.map((p) => (p.p / sum) * room);
+  rest = rest.map((p, i) => ({ ...p, p: Math.max(step, Math.floor(exact[i] / step) * step) }));
+  // Остаток после округления раздаём по одному шагу тем, кого округление обидело сильнее.
+  const order = rest.map((p, i) => i).sort((x, y) => (exact[y] - rest[y].p) - (exact[x] - rest[x].p));
+  for (let left = room - rest.reduce((a2, p) => a2 + p.p, 0), j = 0; left >= step && j < order.length * 3; j++, left -= step) rest[order[j % order.length]].p += step;
+  return [{ ...parts[0], p: 100 - rest.reduce((a, p) => a + p.p, 0) }, ...rest].sort((a, b) => b.p - a.p);
+}
+
 export function validateMixes(out, candidates, cfg = DEFAULTS, asked = new Set()) {
   if (cfg && !cfg.settings && cfg.strength !== undefined) cfg = DEFAULTS; // старый вызов (prefs вместо cfg)
   const st = (cfg || DEFAULTS).settings;
@@ -1320,6 +1342,7 @@ export function validateMixes(out, candidates, cfg = DEFAULTS, asked = new Set()
     parts[0].p += 100 - parts.reduce((a, p) => a + p.p, 0);
     if (parts[0].p <= 0) continue;
     parts.sort((a, b) => b.p - a.p);
+    parts = withBase(parts, st.base_share, step, Math.max(2, st.min_tobaccos));
     parts.forEach((p) => usedAll.add(p.item.k));
 
     const sNum = Math.round(Number(m.strength));
@@ -1498,8 +1521,8 @@ const IMAGE_LABELS = {
   'образы': 'Composition: fill the whole square — exactly three large, clearly different hero objects of similar size in one row in the vertical center, each one depicting its own mix as the dessert, drink or dish from its name; no abstract circles, no repeated shapes, no big empty areas. ' + IMAGE_TEXT_RULES,
 };
 // Место под готовый логотип: сверху по центру. Те же доли использует наложение (LOGO_BOX).
-const LOGO_ZONE = 'IMPORTANT, this overrides anything above: do NOT draw any logo, title, brand name or the words "SIGMA" or "MIX" anywhere. Keep only one small spot at the top center free for a logo that will be added later: the middle 30% of the width, between 8% and 26% of the height. In that spot the same light background simply continues — no objects and no text there, and do NOT draw any box, panel, frame, card or patch of a different shade: the spot must be invisible, with no visible edges. Everything around that spot must be as rich and dense as the bottom of the picture: fill the top-left and top-right corners with large lush clusters of the fresh ingredients, partially cropped by the frame edges and reaching right up to the sides of the spot, plus the light-grey geometric decorations between them. No big empty white areas anywhere, especially not at the top.';
-const LOGO_BOX = { width: 0.235, top: 0.105 }; // доли от ширины картинки
+const LOGO_ZONE = 'IMPORTANT, this overrides anything above: do NOT draw any logo, title, brand name or the words "SIGMA" or "MIX" anywhere. Keep only one small spot at the top center free for a logo that will be added later: the middle 30% of the width, from 2% to 19% of the height (the very top). In that spot the same light background simply continues — no objects and no text there, and do NOT draw any box, panel, frame, card or patch of a different shade: the spot must be invisible, with no visible edges. Everything around that spot must be as rich and dense as the bottom of the picture: fill the top-left and top-right corners with large lush clusters of the fresh ingredients, partially cropped by the frame edges and reaching right up to the sides of the spot, plus the light-grey geometric decorations between them. The three main objects, their flavor labels and all other text must stay entirely below 22% of the height: nothing tall (a glass, a bottle, a flower, a label) may rise into the logo spot. No big empty white areas anywhere, especially not at the top.';
+const LOGO_BOX = { width: 0.235, top: 0.035 }; // доли от ширины картинки
 const IMAGE_SAFETY = 'The only text in the image is the "SIGMA MIX" logo: no other words, labels, numbers or percentages. No people, no hands, no hookah, no cigarettes, no smoke.';
 const IMAGE_TEMPLATE = {
   background: 'Square premium advertising poster for flavor mixes, top-down view, light off-white studio background with subtle minimal light-grey geometric decorations: thin outline circles, small solid triangles, plus signs, dashed lines and diagonal hatching',
