@@ -66,6 +66,7 @@ export const DEFAULT_TEXTS = {
   strength_3: ['средняя', 'միջին', 'Крепость микса'],
   strength_4: ['средне-крепкая', 'միջին-թունդ', 'Крепость микса'],
   strength_5: ['крепкая', 'թունդ', 'Крепость микса'],
+  pack_note: ['только пачка {g} г', 'միայն {g} գ տուփ', 'Пометка у табака, которого нет в маленькой пачке; {g} — вес пачки'],
   bowl_note: ['Граммы указаны на чашу {g} г.', 'Գրամները նշված են {g} գ թասի համար։', 'Под последним миксом; {g} — граммы в чаше'],
   footer: ['🛒 Покажи этот список в магазине — соберём.', '🛒 Ցույց տուր այս ցուցակը խանութում, և մենք կհավաքենք։', 'Под последним миксом, перед ссылкой на сайт'],
   btn_more: ['🔄 Ещё варианты', '🔄 Այլ տարբերակներ', 'Кнопка под миксами'],
@@ -151,8 +152,9 @@ export const DEFAULT_INSTRUCTION = [
   'Сначала придумай образ, потом подбери табаки, которые его складывают, — а не наоборот. Образ собирай только из табаков, которые есть в списке; если для образа чего-то не хватает — выбери другой образ, не натягивай.',
   'Хотя бы один из трёх миксов должен удивлять: неожиданное, но логичное сочетание, до которого клиент сам бы не додумался.',
   'Название — это и есть образ: 1–3 слова, сразу рисует картинку и вкус («Виски сауэр», «Малиновый мохито», «Тирамису на террасе», «Пина колада»). Не перечисляй табаки в названии: «Кэтминт с лимоном» — плохо.',
-  'Описание — 2–3 коротких предложения, до 45 слов, на «ты». Пиши чувственно и дерзко, как соблазняешь: что на первой затяжке, как вкус раскрывается дальше, что остаётся на губах. Текстура, температура, послевкусие; сочные эпитеты (тягучий, ледяной, бархатный, искрящийся). Не перечисляй табаки списком и не начинай с «Ты почувствуешь». Без воды, канцелярита и обещаний про здоровье. Описание честно соответствует вкусам в миксе.',
-  'Примеры наших описаний: «Яркий гранатовый апероль, сочный апельсин и нежный белый персик создают летний коктейльный вкус с мягкой горчинкой.» «Насыщенная ежевика с винной ноткой сочетается со сливочным черничным йогуртом, а медовый персик делает вкус мягким и округлым.» «Лёгкое игристое вино, сочный манго-ананас и яркая цитрусовая кислинка юдзу создают освежающий тропический вкус.»',
+  'Описание — 2–3 коротких предложения, до 45 слов, на «ты». Это не состав, а соблазн: клиент должен захотеть этот микс, ещё не дочитав. Каждый раз выбирай один ход и строй описание вокруг него: сцена (где и когда это курят), движение вкуса (что сначала, что потом, что на выдохе), ощущение в теле (холодок, тепло, тягучесть, пузырьки), сравнение с десертом или коктейлем, характер микса (дерзкий, ленивый, нежный).',
+  'Три описания в одном ответе — три разных хода, разное начало и разный ритм. Не повторяй одни и те же слова и обороты из микса в микс. Конкретика вместо общих слов: не «приятный вкус», а «ириска, которая тянется». Без воды, канцелярита, «ты почувствуешь» и обещаний про здоровье. Не называй вкусов, которых нет в составе.',
+  'Примеры тона (не копируй обороты, бери настроение): «Летняя терраса, в бокале звенит лёд. Гранатовый апероль горчит ровно настолько, чтобы захотелось ещё, а белый персик смягчает финал.» «Сначала ежевика — тёмная, винная, почти терпкая. Потом её накрывает черничный йогурт, и всё становится бархатным. Персик на выдохе — как мёд с ложки.» «Игристое бьёт в нос пузырьками, манго с ананасом тянут в тропики. Юдзу щиплет язык и не даёт расслабиться.»',
   // Два стиля картинки. Какой работает — настройка image_style; ИИ получает только раздел выбранного стиля.
   'КАРТИНКА: КРУГИ',
   'Одна квадратная картинка на все три микса, премиальная рекламная фуд-съёмка сверху. Светлый почти белый фон с лёгкой серой геометрией: тонкие круги, треугольники, плюсики, пунктир, штриховка.',
@@ -474,10 +476,12 @@ function logToSheet(env, ctx, payload) {
 export async function syncConfig(env, fetcher = fetch) {
   if (!env.CONFIG_SHEET_ID) return { ok: false, errors: ['в wrangler.toml не указан CONFIG_SHEET_ID'], warnings: [] };
   let tabs = {};
+  let stockRows = null;
   if (env.SHEET_SCRIPT_URL && env.SHEET_SECRET) {
     // Через скрипт Google, подключённый к таблице: таблицу можно закрыть от посторонних.
     try {
-      const j = await sheetScript(env, { action: 'config', tabs: SHEET_TABS.map((t) => t.name) }, fetcher);
+      const j = await sheetScript(env, { action: 'config', tabs: [...SHEET_TABS.map((t) => t.name), STOCK_TAB] }, fetcher);
+      if (Array.isArray(j.tabs && j.tabs[STOCK_TAB])) stockRows = j.tabs[STOCK_TAB].map((r) => r.map((c) => String(c)));
       for (const t of SHEET_TABS) if (Array.isArray(j.tabs && j.tabs[t.name])) tabs[t.name] = j.tabs[t.name].map((r) => r.map((c) => String(c)));
     } catch (e) {
       return { ok: false, warnings: [], errors: [`не могу прочитать таблицу через скрипт Google (${e.message}). Проверьте, что скрипт развёрнут и секрет в нём совпадает с SHEET_SECRET`] };
@@ -490,6 +494,9 @@ export async function syncConfig(env, fetcher = fetch) {
         if (!r.ok || /^\s*</.test(text)) throw new Error(r.ok ? 'нет доступа' : 'код ' + r.status);
         tabs[t.name] = parseCSV(text);
       }));
+      // «Наличие» — необязательная вкладка; если её нет, Google отдаёт первую — тогда parseStock не найдёт заголовок.
+      stockRows = await fetcher(sheetUrl(env.CONFIG_SHEET_ID, STOCK_TAB).replace('headers=1', 'headers=0'), { headers: { accept: 'text/csv' } })
+        .then((r) => r.text()).then((x) => (/^\s*</.test(x) ? null : parseCSV(x))).catch(() => null);
     } catch (e) {
       return { ok: false, warnings: [], errors: [`не могу прочитать таблицу (${e.message}). Проверьте доступ: «Все, у кого есть ссылка» — «Читатель»`] };
     }
@@ -509,7 +516,8 @@ export async function syncConfig(env, fetcher = fetch) {
       .some((k) => JSON.stringify((old.texts || {})[k]) !== JSON.stringify(cfg.texts[k]));
     if (tChanged || !prev) await applyProfile(env, cfg);
   }
-  return { ok: true, changed: !prev || sections.length > 0, sections: prev ? sections : Object.keys(SECTION_NAMES), newBrands, warnings, cfg };
+  const stock = await syncStock(env, stockRows, cfg).catch((e) => (console.log('stock', e.message), { state: 'error', error: e.message }));
+  return { ok: true, changed: !prev || sections.length > 0, sections: prev ? sections : Object.keys(SECTION_NAMES), newBrands, warnings, cfg, stock };
 }
 
 /** Описание, «О боте» и меню команд — в Telegram, на двух языках. */
@@ -534,6 +542,8 @@ export function syncReport(r) {
   let s = r.changed ? '✅ Применено из таблицы. Изменилось: ' + r.sections.map((k) => SECTION_NAMES[k]).join(', ') + '.' : '✅ Таблица прочитана, изменений нет.';
   if (r.newBrands && r.newBrands.length) s += '\n\n🆕 Новые бренды: ' + r.newBrands.join(', ') + '. Скачаю их вкусы с htreviews в течение ~15 минут на бренд и напишу.';
   if (r.warnings && r.warnings.length) s += '\n\n⚠️ Предупреждения:\n' + r.warnings.map((e) => '• ' + e).join('\n');
+  if (r.stock && r.stock.state === 'error') s += '\n\n📦 Наличие: не получилось разобрать вкладку — ' + r.stock.error;
+  else if (r.stock && (r.stock.state === 'ok' || r.stock.changed)) s += '\n\n' + stockLine(r.stock) + (r.stock.changed ? ' Обновлено.' : '');
   return s;
 }
 
@@ -559,7 +569,7 @@ export function tx(cfg, lang = 'ru') {
     tooFew: g('too_few'), failed: g('failed'), more: g('btn_more'), newReq: g('btn_new'),
     strengthLabel: g('strength_label'),
     strengthNames: ['', g('strength_1'), g('strength_2'), g('strength_3'), g('strength_4'), g('strength_5')],
-    gram: g('gram'), bowlNote: (gr) => fill(g('bowl_note'), { g: gr }), footer: g('footer'),
+    gram: g('gram'), packNote: (w) => fill(g('pack_note'), { g: w }), bowlNote: (gr) => fill(g('bowl_note'), { g: gr }), footer: g('footer'),
     llmLang: lang === 'hy' ? 'армянском (восточноармянский литературный, армянским алфавитом)' : 'русском',
   };
 }
@@ -637,7 +647,11 @@ async function cronConfig(env) {
   const r = await syncConfig(env);
   const statusChanged = await saveStatus(env, r);
   if (!r.ok && statusChanged) await notifyAdmins(env, '⚠️ Автопроверка таблицы.\n' + syncReport(r));
-  if (r.ok && (r.changed || statusChanged)) await notifyAdmins(env, '🔄 Автопроверка таблицы.\n' + syncReport(r));
+  if (r.ok && (r.changed || statusChanged || (r.stock && r.stock.changed))) await notifyAdmins(env, '🔄 Автопроверка таблицы.\n' + syncReport(r));
+  if (r.ok && r.stock && r.stock.pending) {
+    const n = await resolveStock(env, r.cfg).catch((e) => (console.log('resolveStock', e.message), 0));
+    if (n) await notifyAdmins(env, '📦 Разобрал с помощью ИИ нераспознанные позиции склада.\n' + stockReport(await env.KV.get('stock', 'json')).slice(0, 3500));
+  }
   await crawlMissingBrand(env);
 }
 
@@ -735,9 +749,18 @@ async function onText(env, msg, ctx) {
   }
   // Служебные команды: /id — всем (чтобы узнать свой ID для настройки admins), остальные — только админам.
   if (cmd === '/id') return send(env, chat, `Твой Telegram ID: <code>${msg.from && msg.from.id}</code>`);
-  if (cmd === '/reload' || cmd === '/config') {
+  if (cmd === '/reload' || cmd === '/config' || cmd === '/stock') {
     if (!(await adminIds(env)).includes(String(msg.from && msg.from.id))) return send(env, chat, 'Эта команда только для админов бота.');
-    if (cmd === '/config') return send(env, chat, configSummary(await loadConfig(env), env));
+    if (cmd === '/stock') {
+      let stock = await env.KV.get('stock', 'json').catch(() => null);
+      if (stock && stock.unmatched.some((u) => !u.tried)) {
+        await send(env, chat, '⏳ Разбираю нераспознанные позиции с помощью ИИ…');
+        await resolveStock(env, await loadConfig(env)).catch((e) => console.log('resolveStock', e.message));
+        stock = await env.KV.get('stock', 'json').catch(() => null);
+      }
+      return send(env, chat, esc(stockReport(stock)).slice(0, 4000));
+    }
+    if (cmd === '/config') return send(env, chat, configSummary(await loadConfig(env), env, await env.KV.get('stock', 'json').catch(() => null)));
     await send(env, chat, '⏳ Читаю таблицу…');
     const r = await syncConfig(env);
     await saveStatus(env, r);
@@ -787,7 +810,7 @@ async function onText(env, msg, ctx) {
 }
 
 /** /config — коротко, что сейчас действует. */
-export function configSummary(cfg, env = {}) {
+export function configSummary(cfg, env = {}, stock = null) {
   const at = cfg._at ? new Date(cfg._at).toLocaleString('ru-RU', { timeZone: 'Europe/Moscow', day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) + ' МСК' : 'ещё не загружалась — работают значения из кода';
   const s = cfg.settings;
   const e = applyBrains(env, cfg);
@@ -807,6 +830,7 @@ export function configSummary(cfg, env = {}) {
     `разбор запроса: ${splitInstruction(cfg.instruction).parseFromTable ? 'из таблицы' : 'текст из кода'} · ограничений: ${cfg.limits.length}\n` +
     `Чаша ${s.bowl_grams} г · табаков в миксе ${s.min_tobaccos}–${s.max_tobaccos} · доли кратны ${s.share_step}% · без повторов: ${yn(s.no_repeats)}\n` +
     `Стиль картинки: ${esc(s.image_style)} (${mixInstruction(cfg.instruction, s.image_style).fromTable ? 'раздел из таблицы' : 'текст из кода'})\n` +
+    stockLine(stock ? { state: 'ok', ...stockStats(stock) } : null) + '\n' +
     `Крепкое только по запросу: ${yn(s.strong_only_on_request)} · только из наличия: ${yn(s.only_in_stock)} · картинки: ${yn(s.images)}\n` +
     `Админов: ${s.admins.length + String(env.ADMIN_IDS || '').split(',').filter((x) => x.trim()).length}\n\n` +
     'Изменения в таблице подтягиваются сами раз в 15 минут, или сразу — командой /reload.';
@@ -1181,7 +1205,9 @@ export function renderMix(m, i, t = 'ru', total = 3, bowl = 20) {
     const it = p.item;
     const line = it.l && it.l !== 'Основная' ? ' ' + it.l : '';
     const g = Math.round((p.p * bowl) / 100 * 2) / 2; // до полуграмма
-    return `${p.p}% · ${String(g).replace('.', ',')} ${t.gram} — <b>${esc(it.n)}</b> · ${esc(it.b + line)}`;
+    // В наличии только большая пачка — честно предупреждаем.
+    const pack = Array.isArray(it.w) && it.w.length && it.w[0] > 40 ? ` · <i>${esc(t.packNote(it.w[0]))}</i>` : '';
+    return `${p.p}% · ${String(g).replace('.', ',')} ${t.gram} — <b>${esc(it.n)}</b> · ${esc(it.b + line)}${pack}`;
   });
   const strength = typeof m.strength === 'number' ? t.strengthNames[m.strength] : m.strength;
   return (
@@ -1393,11 +1419,10 @@ async function loadCatalog(env) {
   if (catCache.items.length && catCache.sig === sig && Date.now() - catCache.at < 10 * 60 * 1000) return catCache.items;
   const parts = await Promise.all(brands.map((b) => env.KV.get('cat:' + b, 'json')));
   let items = parts.flatMap((p) => (p && p.items) || []);
-  // Наличие: когда появится выгрузка склада, в KV кладётся ключ stock — список ключей табаков.
-  const stock = cfg.settings.only_in_stock ? await env.KV.get('stock', 'json') : null;
-  if (Array.isArray(stock) && stock.length) {
-    const set = new Set(stock);
-    items = items.filter((x) => set.has(x.k));
+  // Наличие: оставляем только табаки, которые есть на складе, и запоминаем, в каких пачках (w).
+  const stock = cfg.settings.only_in_stock ? await env.KV.get('stock', 'json').catch(() => null) : null;
+  if (stock && stock.items && Object.keys(stock.items).length >= STOCK_MIN) {
+    items = items.filter((x) => stock.items[x.k]).map((x) => ({ ...x, w: stock.items[x.k] }));
   }
   catCache = { at: Date.now(), sig, items };
   return items;
@@ -1597,4 +1622,194 @@ async function sendPhoto(env, chat, bytes, caption, reply_markup) {
   const r = await fetch(`https://api.telegram.org/bot${env.BOT_TOKEN}/sendPhoto`, { method: 'POST', body: form });
   const j = await r.json().catch(() => ({}));
   if (!j.ok) { console.log('tg sendPhoto', JSON.stringify(j).slice(0, 300)); if (caption) await send(env, chat, caption, reply_markup); }
+}
+
+/* ═════════════════════════ Наличие (выгрузка склада) ═════════════════════════
+ * Менеджер вставляет выгрузку «Остатки» из МоегоСклада как есть на вкладку «Наличие».
+ * Бот берёт из неё табаки наших брендов, сопоставляет со справочником htreviews и собирает миксы только из них.
+ */
+export const STOCK_TAB = 'Наличие';
+const cellNum = (v) => Number(String(v == null ? '' : v).replace(/\s/g, '').replace(',', '.')) || 0;
+
+/** Строки вкладки → позиции с остатком: { group, name, qty }. Группа — строка-заголовок вида «DEUS 30г». */
+export function parseStock(rows) {
+  const hi = (rows || []).findIndex((r) => r.some((c) => String(c).trim() === 'Наименование') && r.some((c) => String(c).trim() === 'Доступно'));
+  if (hi < 0) return null;
+  const h = rows[hi].map((c) => String(c).trim());
+  const iName = h.indexOf('Наименование'), iQty = h.indexOf('Доступно'), iCode = h.indexOf('Код');
+  const out = [];
+  let group = '';
+  for (const r of rows.slice(hi + 1)) {
+    const name = String(r[iName] || '').trim();
+    const code = String(r[iCode >= 0 ? iCode : 0] || '').trim();
+    if (!name) { if (code && !/^\d+$/.test(code)) group = code; continue; }
+    if (/^итого/i.test(name)) continue;
+    if (group && cellNum(r[iQty]) > 0) out.push({ group, name, qty: cellNum(r[iQty]) });
+  }
+  return out;
+}
+
+const escRe = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+const WEIGHT_RE = /(\d{2,3})\s*гр?\.?(?![а-яёa-z])/i;
+
+/** Из «Kraken/KRAKEN Medium Seco 30 гр» + «KRAKEN Medium Seco  Фисташки  30 гр» → бренд, линейка, вес, варианты названия вкуса. */
+export function stockEntry(pos, brandNames) {
+  const both = pos.group + ' ' + pos.name;
+  const brand = brandNames.find((b) => squash(both).includes(squash(b)));
+  if (!brand) return null;
+  if (/сигар[аы]/i.test(both)) return null; // сигары — не кальянный табак
+  const w = (pos.name.match(WEIGHT_RE) || pos.group.match(WEIGHT_RE) || [])[1];
+  const cut = (s) => s.replace(new RegExp(escRe(brand), 'gi'), ' ').replace(new RegExp(WEIGHT_RE.source, 'gi'), ' ').replace(/[\/"«»]/g, ' ');
+  const line = cut(pos.group).replace(/\s+/g, ' ').trim();
+  let flavor = cut(pos.name);
+  for (const word of line.split(' ').filter((x) => x.length > 1)) flavor = flavor.replace(new RegExp('(^|\\s)' + escRe(word) + '(?=\\s|$)', 'gi'), ' ');
+  flavor = flavor.replace(/\s+HL\s*$/i, '').replace(/[.,;\s]+$/g, '').replace(/^[.,;\s]+/g, '').replace(/\s+/g, ' ').trim();
+  if (!flavor) flavor = line;
+  const m = flavor.match(/^(.*?)\s*\((.+)\)\s*$/);
+  const names = (m ? [m[1], m[2], m[2].replace(/^аромат\w*\s+/i, '')] : [flavor]).map((x) => x.trim()).filter((x) => x.length >= 2);
+  return { brand, line, weight: Number(w) || 0, flavor, names: [...new Set(names)], id: (brand + '|' + line + '|' + flavor).toLowerCase() };
+}
+
+// Признаки линейки — чтобы «Strong Ligero» не сопоставился с «Medium Seco», а «Поп» — с обычным Хулиганом.
+const LINE_TAGS = [
+  ['strong', /strong|ligero|hard|хард|стронг|крепк/i], ['medium', /medium|middle|медиум|мидл|seco/i], ['classic', /classic|классик/i],
+  ['mix', /(^|\s)mix|микс/i], ['kitchen', /kitchen|китчен|кухн/i], ['prime', /prime|прайм/i], ['pop', /(^|\s)(pop|поп)(\s|$)/i],
+  ['old', /old\s*school|олд/i], ['perfume', /perfume|парфюм/i], ['caviar', /caviar/i], ['cigar', /cigar|reflection/i],
+];
+const lineTags = (s) => new Set(LINE_TAGS.filter(([, re]) => re.test(s || '')).map(([t]) => t));
+function lineScore(stockLine, catLine) {
+  const a = lineTags(stockLine), b = lineTags(catLine);
+  let s = 0;
+  for (const t of a) s += b.has(t) ? 2 : 0;
+  for (const t of b) if (!a.has(t)) s -= 1;
+  if (a.has('strong') !== b.has('strong')) s -= 3;
+  if (a.has('pop') !== b.has('pop')) s -= 3;
+  return s;
+}
+
+/**
+ * Сопоставляем позиции склада со справочником. map — готовые ответы (от ИИ или прошлых запусков): id → ключ табака или ''.
+ * Возвращает items: { ключ: [веса пачек] } и список нераспознанного.
+ */
+export function matchStock(positions, catalog, map = {}) {
+  const brandNames = [...new Set(catalog.map((x) => x.b))];
+  const items = {}, unmatched = [];
+  let tobaccos = 0;
+  const seenUn = new Set();
+  for (const pos of positions) {
+    const e = stockEntry(pos, brandNames);
+    if (!e) continue;
+    tobaccos++;
+    let key = map[e.id];
+    if (key === undefined) {
+      const hits = [];
+      for (const it of catalog) {
+        if (it.b !== e.brand) continue;
+        let rank = 0;
+        for (const v of e.names) {
+          const sv = squash(v);
+          if (sv && (sv === squash(it.n) || (it.a && sv === squash(it.a)))) { rank = 2; break; }
+          if (similarName(v, it.n) || (it.a && similarName(v, it.a))) rank = Math.max(rank, 1);
+        }
+        if (rank) hits.push({ it, rank, line: lineScore(e.line, it.l), diff: Math.abs(squash(it.n).length - squash(e.names[0]).length) });
+      }
+      hits.sort((x, y) => y.rank - x.rank || y.line - x.line || x.diff - y.diff || (y.it.c || 0) - (x.it.c || 0));
+      // Совпало название, но линейка явно другая (Strong ↔ Medium) — не берём: это другой по крепости табак.
+      key = hits.length && hits[0].line > -3 ? hits[0].it.k : undefined;
+    }
+    if (key) {
+      (items[key] = items[key] || []).includes(e.weight) || items[key].push(e.weight);
+    } else if (!seenUn.has(e.id)) {
+      seenUn.add(e.id);
+      unmatched.push({ id: e.id, brand: e.brand, line: e.line, flavor: e.flavor, tried: key === '' });
+    }
+  }
+  for (const k of Object.keys(items)) items[k].sort((a, b) => a - b);
+  return { items, unmatched, tobaccos };
+}
+
+async function allBrandItems(env, cfg) {
+  const parts = await Promise.all(cfg.brands.filter((b) => b.on).map((b) => env.KV.get('cat:' + b.code, 'json')));
+  return parts.flatMap((p) => (p && p.items) || []);
+}
+const quickHash = (s) => { let h = 5381; for (let i = 0; i < s.length; i++) h = ((h << 5) + h + s.charCodeAt(i)) | 0; return String(h); };
+
+/** Пересчитать наличие по строкам вкладки. Ничего не меняет, если выгрузка и справочник те же. */
+export async function syncStock(env, rows, cfg, force = false) {
+  const positions = parseStock(rows);
+  const prev = await env.KV.get('stock', 'json').catch(() => null);
+  if (!positions || !positions.length) {
+    if (prev) { await env.KV.delete('stock'); catCache = { at: 0, sig: '', items: [] }; }
+    return { state: 'none', changed: !!prev };
+  }
+  const catalog = await allBrandItems(env, cfg);
+  const map = (await env.KV.get('stockmap', 'json').catch(() => null)) || {};
+  const hash = quickHash(JSON.stringify([positions.map((p) => [p.group, p.name]), catalog.length, Object.keys(map).length]));
+  if (!force && prev && prev.hash === hash) return { state: 'ok', changed: false, ...stockStats(prev) };
+  const res = matchStock(positions, catalog, map);
+  const stock = { at: new Date().toISOString(), hash, positions: positions.length, tobaccos: res.tobaccos, items: res.items, unmatched: res.unmatched };
+  await env.KV.put('stock', JSON.stringify(stock));
+  await env.KV.put('stock:rows', JSON.stringify(positions));
+  catCache = { at: 0, sig: '', items: [] };
+  return { state: 'ok', changed: true, ...stockStats(stock) };
+}
+const STOCK_MIN = 20; // меньше — считаем, что с выгрузкой что-то не так, и наличие не применяем
+const stockStats = (s) => ({ positions: s.positions, tobaccos: s.tobaccos, flavors: Object.keys(s.items || {}).length,
+  unmatched: (s.unmatched || []).length, pending: (s.unmatched || []).filter((u) => !u.tried).length, at: s.at });
+
+export function stockLine(st) {
+  if (!st || st.state === 'none') return '📦 Наличие: вкладка «Наличие» пустая или её нет — подбираю из всего справочника.';
+  return `📦 Наличие: в выгрузке ${st.positions} позиций, из них наших табаков ${st.tobaccos} → ${st.flavors} вкусов в подборе` +
+    (st.unmatched ? `, не распознано ${st.unmatched}` + (st.pending ? ' (разберу с помощью ИИ в течение 15 минут или сразу по команде /stock)' : ' — список по команде /stock') : '') + '.' +
+    (st.flavors < STOCK_MIN ? `\n⚠️ Распознано меньше ${STOCK_MIN} вкусов — наличие пока НЕ применяю, подбираю из всего справочника.` : '');
+}
+
+/** Нераспознанные позиции отдаём ИИ: по каждому бренду — список со склада и список из справочника. */
+export async function resolveStock(env, cfg) {
+  const stock = await env.KV.get('stock', 'json').catch(() => null);
+  const todo = ((stock && stock.unmatched) || []).filter((u) => !u.tried);
+  if (!todo.length) return 0;
+  const catalog = await allBrandItems(env, cfg);
+  const map = (await env.KV.get('stockmap', 'json').catch(() => null)) || {};
+  const e = applyBrains(env, cfg);
+  const brands = [...new Set(todo.map((u) => u.brand))];
+  await Promise.all(brands.map(async (brand) => {
+    const cat = catalog.filter((x) => x.b === brand);
+    const mine = todo.filter((u) => u.brand === brand).slice(0, 80);
+    if (!cat.length) { for (const u of mine) map[u.id] = ''; return; }
+    const sys = 'Ты сопоставляешь позиции склада кальянного магазина со справочником табаков бренда ' + brand + '. ' +
+      'Для каждой позиции склада найди ТОТ ЖЕ табак в справочнике: то же название (возможен перевод, транслит, сокращение, другое написание) и та же линейка по крепости ' +
+      '(Strong / Hard / Ligero не равно Medium / Classic). Если точного соответствия нет — ставь 0, не подбирай «похожий вкус». ' +
+      'Верни ТОЛЬКО JSON: {"номер позиции склада": номер из справочника или 0}.';
+    const user = 'СПРАВОЧНИК (номер|линейка|название|второе название):\n' + cat.map((x, i) => `${i + 1}|${x.l}|${x.n}|${x.a}`).join('\n') +
+      '\n\nСКЛАД (номер|линейка|название):\n' + mine.map((u, i) => `${i + 1}|${u.line}|${u.flavor}`).join('\n');
+    const out = await llmJson(e, sys, user, 3000);
+    if (!out) return; // ИИ не ответил — попробуем в следующий раз
+    mine.forEach((u, i) => { const it = cat[Number(out[String(i + 1)]) - 1]; map[u.id] = it ? it.k : ''; });
+  }));
+  await env.KV.put('stockmap', JSON.stringify(map));
+  const rows = await env.KV.get('stock:rows', 'json').catch(() => null);
+  if (rows) {
+    const res = matchStock(rows, catalog, map);
+    Object.assign(stock, { items: res.items, unmatched: res.unmatched, tobaccos: res.tobaccos, at: new Date().toISOString(),
+      hash: quickHash(JSON.stringify([rows.map((p) => [p.group, p.name]), catalog.length, Object.keys(map).length])) });
+    await env.KV.put('stock', JSON.stringify(stock));
+    catCache = { at: 0, sig: '', items: [] };
+  }
+  return todo.length;
+}
+
+/** Ответ на /stock: сводка и список нераспознанного. */
+export function stockReport(stock) {
+  if (!stock) return stockLine(null);
+  const st = { state: 'ok', ...stockStats(stock) };
+  let s = stockLine(st) + '\nОбновлено: ' + new Date(stock.at).toLocaleString('ru-RU', { timeZone: 'Europe/Moscow', day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) + ' МСК';
+  const by = {};
+  for (const k of Object.keys(stock.items)) { const b = k.split('/')[0]; by[b] = (by[b] || 0) + 1; }
+  s += '\n\nПо брендам: ' + Object.entries(by).map(([b, n]) => `${b} — ${n}`).join(', ');
+  if (stock.unmatched.length) {
+    s += '\n\n❓ Не распознано (в подборе не участвуют):\n' + stock.unmatched.slice(0, 60).map((u) => `• ${u.brand} ${u.line} — ${u.flavor}`).join('\n') +
+      (stock.unmatched.length > 60 ? `\n…и ещё ${stock.unmatched.length - 60}` : '');
+  }
+  return s;
 }
