@@ -58,6 +58,8 @@ export const DEFAULT_TEXTS = {
     'Фразы, которые сменяют друг друга, пока бот думает. Разделяются знаком |'],
   strength_remembered: ['Крепость — как в прошлый раз: {s}. Захочешь иначе — просто напиши.', 'Թնդությունը՝ նախորդի պես․ {s}։ Եթե ուզում ես այլ կերպ, պարզապես գրիր։',
     'Под «Подбираю миксы…», если бот взял крепость из прошлого запроса'],
+  out_of_stock: ['Сейчас нет в наличии: {name}. Собрали миксы с похожим вкусом из того, что есть 👇', 'Հիմա առկա չէ՝ {name}։ Հավաքել ենք նման համով միքսեր առկա տեսականուց 👇',
+    'Строка перед миксами, если клиент попросил табак, которого нет в наличии'],
   picking_more: ['🔄 Думаю над другими вариантами…', '🔄 Մտածում եմ այլ տարբերակների մասին…', 'После кнопки «Ещё варианты»'],
   gram: ['г', 'գ', 'Сокращение «грамм» в составе микса'],
   strength_label: ['Крепость:', 'Թնդություն՝', 'Подпись перед крепостью микса'],
@@ -566,6 +568,7 @@ export function tx(cfg, lang = 'ru') {
     tellFirst: g('tell_first'), noCatalog: g('no_catalog'), picking: g('picking'), pickingMore: g('picking_more'),
     progress: g('progress').split('|').map((x) => x.trim()).filter(Boolean),
     strengthRemembered: (s) => fill(g('strength_remembered'), { s }),
+    outOfStock: (name) => fill(g('out_of_stock'), { name }),
     tooFew: g('too_few'), failed: g('failed'), more: g('btn_more'), newReq: g('btn_new'),
     strengthLabel: g('strength_label'),
     strengthNames: ['', g('strength_1'), g('strength_2'), g('strength_3'), g('strength_4'), g('strength_5')],
@@ -969,7 +972,9 @@ async function makeMixes(env, chat, session, more = false, lang = 'ru', note = '
 
   const bowl = cfg.settings.bowl_grams;
   const shop = cfg.settings.shop_url;
-  const text = result.map((m, i) => renderMix(m, i, t, result.length, bowl)).join('\n\n') +
+  // Одной строкой перед миксами: чего нет в наличии. Дальше миксы как обычно, без оговорок в описаниях.
+  const gone = !more && (session.missing || []).length ? esc(t.outOfStock(session.missing.map((m) => m.name).join(', '))) + '\n\n' : '';
+  const text = gone + result.map((m, i) => renderMix(m, i, t, result.length, bowl)).join('\n\n') +
     '\n\n<i>' + t.bowlNote(bowl) + '</i>\n' + t.footer + (shop ? ' ' + shop : '');
   if (cfg.settings.images && cfg.settings.image_first) {
     // Вместе: «загрузка» крутится, пока рисуется картинка, потом сразу картинка и текст.
@@ -1142,7 +1147,7 @@ async function composeMixes(env, session, candidates, lang = 'ru', cfg = DEFAULT
     'Желаемая крепость: ' + want + '\n' +
     (session.titles && session.titles.length ? 'Уже предлагали, не повторяй: ' + session.titles.join('; ') + '\n' : '') +
     ((session.missing || []).length ? 'Сейчас нет в наличии: ' + session.missing.map((m) => `${m.name} (вкус: ${m.t.join(', ') || '—'})`).join('; ') +
-      '. Не отказывай и не предлагай ждать поступления: собери три микса с максимально похожим вкусом из списка. В описании первого микса одной короткой фразой скажи, что это замена тому, что клиент просил.\n' : '') +
+      '. Не отказывай и не предлагай ждать поступления: собери три микса с максимально похожим вкусом из списка. Клиенту уже отдельно сказали, что этого табака нет: в названиях и описаниях миксов его не упоминай и не пиши про замену — описывай миксы как обычно.\n' : '') +
     '\nТабаки в наличии:\n' + lines.join('\n');
   const out = await llmJson(env, composePrompt(cfg, lang), user, 4000);
   const mixes = validateMixes(out, candidates, cfg, asked);
