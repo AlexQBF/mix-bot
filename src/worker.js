@@ -115,6 +115,8 @@ export const DEFAULT_SETTINGS = [
     desc: 'Сколько часов бот помнит выбранную клиентом крепость и не переспрашивает в следующих запросах. 0 — спрашивать каждый раз.' },
   { key: 'only_in_stock', def: 'да', type: 'yesno', desc: 'Только то, что есть на складе (да / нет). Заработает, когда подключим выгрузку склада; до этого — все вкусы наших брендов.' },
   { key: 'images', def: 'да', type: 'yesno', desc: 'Рисовать картинку к миксам (да / нет). Как она выглядит — во вкладке «Инструкция».' },
+  { key: 'image_style', def: 'круги', type: 'choice', options: { 'круги': ['круги', 'кружки', 'соусы', 'circles'], 'образы': ['образы', 'образ', 'предметы', 'objects'] },
+    desc: 'Стиль картинки: «круги» — три круга-соуса в цветах вкусов; «образы» — три разных предмета по названиям миксов (пломбир, бокал, брауни). У каждого стиля свой раздел во вкладке «Инструкция»: «КАРТИНКА: КРУГИ» и «КАРТИНКА: ОБРАЗЫ».' },
   { key: 'image_first', def: 'да', type: 'yesno',
     desc: '«да» — картинка и текст приходят вместе, пока готовятся — бот показывает «загрузку» со сменой фраз. «нет» — сначала текст, картинка следом (быстрее).' },
   { key: 'shop_url', def: 'https://vektorsigma.am', type: 'text', desc: 'Ссылка на магазин под миксами. Пусто — без ссылки.' },
@@ -151,12 +153,20 @@ export const DEFAULT_INSTRUCTION = [
   'Название — это и есть образ: 1–3 слова, сразу рисует картинку и вкус («Виски сауэр», «Малиновый мохито», «Тирамису на террасе», «Пина колада»). Не перечисляй табаки в названии: «Кэтминт с лимоном» — плохо.',
   'Описание — 2–3 коротких предложения, до 45 слов, на «ты». Пиши чувственно и дерзко, как соблазняешь: что на первой затяжке, как вкус раскрывается дальше, что остаётся на губах. Текстура, температура, послевкусие; сочные эпитеты (тягучий, ледяной, бархатный, искрящийся). Не перечисляй табаки списком и не начинай с «Ты почувствуешь». Без воды, канцелярита и обещаний про здоровье. Описание честно соответствует вкусам в миксе.',
   'Примеры наших описаний: «Яркий гранатовый апероль, сочный апельсин и нежный белый персик создают летний коктейльный вкус с мягкой горчинкой.» «Насыщенная ежевика с винной ноткой сочетается со сливочным черничным йогуртом, а медовый персик делает вкус мягким и округлым.» «Лёгкое игристое вино, сочный манго-ананас и яркая цитрусовая кислинка юдзу создают освежающий тропический вкус.»',
-  'КАРТИНКА',
+  // Два стиля картинки. Какой работает — настройка image_style; ИИ получает только раздел выбранного стиля.
+  'КАРТИНКА: КРУГИ',
   'Одна квадратная картинка на все три микса, премиальная рекламная фуд-съёмка сверху. Светлый почти белый фон с лёгкой серой геометрией: тонкие круги, треугольники, плюсики, пунктир, штриховка.',
   'Композиция занимает весь квадрат, без больших пустых мест. Сверху по центру логотип: слово SIGMA тонкими чёрными буквами, под ним MIX жирными чёрными буквами.',
   'В середине кадра в один ряд три крупных круга одинакового размера — микс 1, 2, 3 слева направо. Каждый круг — густые глянцевые соусы цвета вкусов микса, перетекающие друг в друга как инь-ян, с капелькой снизу.',
   'Рядом с каждым соусом, снаружи круга, — короткая подпись вкуса: «печенье», «карамель», «лимон». Мелко, аккуратно, тёмно-серым. Без линий, стрелок и выносок — и так понятно, к чему подпись.',
   'Под каждым кругом — крупная чёрная цифра 1, 2, 3, а под цифрой название этого микса заглавными жирными буквами.',
+  'По краям и в нижних углах кадра свежие ингредиенты миксов, частично обрезанные краем. Сочные цвета, мягкие тени. Без брендов и процентов. Без людей, рук, кальянов, сигарет и дыма.',
+  'КАРТИНКА: ОБРАЗЫ',
+  'Одна квадратная картинка на все три микса, премиальная рекламная фуд-съёмка сверху. Светлый почти белый фон с лёгкой серой геометрией: тонкие круги, треугольники, плюсики, пунктир, штриховка.',
+  'Композиция занимает весь квадрат, без больших пустых мест. Сверху по центру логотип: слово SIGMA тонкими чёрными буквами, под ним MIX жирными чёрными буквами.',
+  'В середине кадра в один ряд три крупных изображения одинакового размера — микс 1, 2, 3 слева направо. Каждое изображение — это сам образ микса из его названия, а не абстрактный круг: если микс «Клубничный пломбир» — шарик пломбира с клубникой, если «Виски сауэр» — бокал коктейля с пенкой и лимоном, если «Брауни» — кусок брауни. Аппетитно, сочно, с глянцем, в цветах вкусов этого микса. Все три разные.',
+  'Рядом с каждым изображением 2–3 коротких подписи вкусов из состава микса: «клубника», «сливки», «лёд». Мелко, аккуратно, тёмно-серым, без линий и стрелок.',
+  'Под каждым изображением — крупная чёрная цифра 1, 2, 3, а под цифрой название этого микса заглавными жирными буквами.',
   'По краям и в нижних углах кадра свежие ингредиенты миксов, частично обрезанные краем. Сочные цвета, мягкие тени. Без брендов и процентов. Без людей, рук, кальянов, сигарет и дыма.',
   // Этот раздел идёт не миксологу, а на первый шаг — разбор сообщения клиента. Бот находит его по названию.
   'РАЗБОР ЗАПРОСА',
@@ -209,6 +219,28 @@ const isParseTitle = (x) => isSectionTitle(x) && /^РАЗБОР ЗАПРОС/i.t
  * Делим инструкцию: раздел «РАЗБОР ЗАПРОСА» — для первого шага (понять сообщение клиента),
  * всё остальное — миксологу. Нет такого раздела в таблице — для разбора берём текст из кода.
  */
+const IMAGE_STYLES = { 'круги': /КРУГ/i, 'образы': /ОБРАЗ/i };
+const isImageTitle = (x) => isSectionTitle(x) && /^КАРТИНК/i.test(x.trim());
+
+/**
+ * Инструкция для миксолога с разделом про картинку только выбранного стиля (image_style).
+ * Раздел стиля — «КАРТИНКА: КРУГИ» / «КАРТИНКА: ОБРАЗЫ»; просто «КАРТИНКА» считается кругами.
+ * Нет нужного раздела в таблице — берём его текст из кода (fromTable = false).
+ */
+export function mixInstruction(lines, style = 'круги') {
+  const re = IMAGE_STYLES[style] || IMAGE_STYLES['круги'];
+  const sections = [];
+  for (const x of splitInstruction(lines).mix) {
+    if (isSectionTitle(x) || !sections.length) sections.push([x]); else sections[sections.length - 1].push(x);
+  }
+  const matches = (sec) => isImageTitle(sec[0]) && (re.test(sec[0]) || (style === 'круги' && !Object.values(IMAGE_STYLES).some((r) => r.test(sec[0]))));
+  const rest = sections.filter((sec) => !isImageTitle(sec[0]));
+  let mine = sections.find(matches);
+  const fromTable = !!mine && mine.length > 1;
+  if (!fromTable) mine = lines === DEFAULT_INSTRUCTION ? ['КАРТИНКА'] : mixInstruction(DEFAULT_INSTRUCTION, style).image;
+  return { lines: [...rest, ['КАРТИНКА', ...mine.slice(1)]].flat(), image: mine, fromTable };
+}
+
 export function splitInstruction(lines) {
   const parse = [], mix = [];
   let inParse = false;
@@ -363,6 +395,9 @@ export function buildConfig(tabs) {
         cfg.texts[key][lang] = val;
       }
     }
+  }
+  if (cfg.instruction.length && !mixInstruction(cfg.instruction, cfg.settings.image_style).fromTable) {
+    warnings.push(`Инструкция: выбран стиль картинки «${cfg.settings.image_style}», а раздела «КАРТИНКА: ${cfg.settings.image_style.toUpperCase()}» нет — рисую по тексту из кода`);
   }
   return { cfg, errors, warnings };
 }
@@ -771,6 +806,7 @@ export function configSummary(cfg, env = {}) {
     `Инструкция: ${cfg.instruction.filter(isSectionTitle).length} разделов, ${cfg.instruction.join(' ').length} знаков · ` +
     `разбор запроса: ${splitInstruction(cfg.instruction).parseFromTable ? 'из таблицы' : 'текст из кода'} · ограничений: ${cfg.limits.length}\n` +
     `Чаша ${s.bowl_grams} г · табаков в миксе ${s.min_tobaccos}–${s.max_tobaccos} · доли кратны ${s.share_step}% · без повторов: ${yn(s.no_repeats)}\n` +
+    `Стиль картинки: ${esc(s.image_style)} (${mixInstruction(cfg.instruction, s.image_style).fromTable ? 'раздел из таблицы' : 'текст из кода'})\n` +
     `Крепкое только по запросу: ${yn(s.strong_only_on_request)} · только из наличия: ${yn(s.only_in_stock)} · картинки: ${yn(s.images)}\n` +
     `Админов: ${s.admins.length + String(env.ADMIN_IDS || '').split(',').filter((x) => x.trim()).length}\n\n` +
     'Изменения в таблице подтягиваются сами раз в 15 минут, или сразу — командой /reload.';
@@ -896,7 +932,7 @@ async function coverImage(env, mixes, cfg) {
   const own = String(mixes.image || '');
   const good = own.length > 200 && /sigma/i.test(own);
   const labels = env.IMAGE_PROVIDER === 'openai';
-  const prompt = good ? own + ' ' + (labels ? IMAGE_LABELS : IMAGE_SAFETY) : imagePrompt(mixes);
+  const prompt = good ? own + ' ' + (labels ? IMAGE_LABELS[cfg.settings.image_style] || IMAGE_LABELS['круги'] : IMAGE_SAFETY) : imagePrompt(mixes);
   let lastErr = '';
   const attempt = (e2) => makeImage(e2, prompt).catch((e) => (console.log('image', e.message), lastErr = e.message, null));
   let photo = await attempt(env);
@@ -1007,7 +1043,8 @@ export function pickCandidates(catalog, prefs, used = [], more = false, cfg = DE
 export function composePrompt(cfg, lang = 'ru') {
   const t = tx(cfg, lang);
   const st = cfg.settings;
-  return splitInstruction(cfg.instruction).mix.join('\n') + '\n\n' +
+  const style = cfg.settings.image_style || 'круги';
+  return mixInstruction(cfg.instruction, style).lines.join('\n') + '\n\n' +
     (cfg.limits.length ? 'ОБЯЗАТЕЛЬНЫЕ ОГРАНИЧЕНИЯ ОТ КОМАНДЫ — они важнее всего остального:\n' + cfg.limits.map((x) => '- ' + x).join('\n') + '\n\n' : '') +
     // ↓ технические рамки и формат ответа: от них зависит, сможет ли бот разобрать ответ.
     'ТЕХНИЧЕСКИЕ ТРЕБОВАНИЯ:\n' +
@@ -1020,12 +1057,14 @@ export function composePrompt(cfg, lang = 'ru') {
     '- У каждого табака "look" НА АНГЛИЙСКОМ: густой глянцевый соус цвета этого вкуса, 3–6 слов ("glossy deep purple blackberry syrup").\n' +
     '- garnish в каждом миксе — НА АНГЛИЙСКОМ свежие ингредиенты этого микса, 3–5 штук через запятую.\n' +
     '- image — задание для модели рисования НА АНГЛИЙСКОМ, 80–180 слов: одна картинка на все три микса строго по разделу инструкции про картинку, ' +
-    'с конкретными цветами соусов каждого микса (слева направо — микс 1, 2, 3) и ингредиентами. Без людей, кальянов, сигарет и дыма.\n' +
+    'с конкретным описанием изображения каждого микса (слева направо — микс 1, 2, 3): что нарисовано, цвета, ингредиенты. Без людей, кальянов, сигарет и дыма.\n' +
     (cfg.settings.image_ai === 'chatgpt'
-      ? '  Подписи: рядом с каждым соусом, снаружи круга, — короткая подпись вкуса, 1–2 слова на ' + t.llmLang + ' языке («печенье», «карамель», «лимон»), БЕЗ линий и стрелок. ' +
-        'Под каждым кругом — крупная цифра и под ней название этого микса заглавными буквами. ' +
-        'Текст каждой подписи и каждого названия дай в задании дословно в кавычках и укажи, к какому кругу и соусу он относится. Бренды и проценты не пиши.\n'
-      : '  На картинке никаких подписей и выносок, даже если в инструкции сказано иначе: только логотип и цифры под кругами.\n') +
+      ? (style === 'образы'
+        ? '  Стиль «образы»: три РАЗНЫХ предмета — каждый изображает сам образ своего микса из названия (десерт, напиток, блюдо), никаких абстрактных кругов и одинаковых форм. '
+        : '  Стиль «круги»: три одинаковых по размеру круга из глянцевых соусов; назови точный цвет каждого соуса каждого круга. Никаких других предметов вместо кругов. ') +
+        'Текст на картинке — на ' + t.llmLang + ' языке: подписи вкусов по 1–2 слова («печенье», «карамель», «лимон») рядом с тем, что они называют, БЕЗ линий и стрелок; под каждым миксом цифра и его название заглавными буквами. ' +
+        'Каждую подпись и каждое название дай в задании дословно в кавычках и укажи, к какому миксу и к какой его части они относятся. Бренды и проценты не пиши.\n'
+      : '  На картинке никаких подписей и названий, даже если в инструкции сказано иначе: только логотип и цифры 1, 2, 3 под миксами.\n') +
     'Верни ТОЛЬКО JSON: {"mixes":[{"title":"","parts":[{"n":1,"p":50,"look":""}],"text":"","strength":3,"garnish":""}],"image":""}';
 }
 
@@ -1262,8 +1301,12 @@ export function parseJson(text) {
  * Обычно задание для картинки пишет ИИ по разделу «КАРТИНКА» из инструкции.
  * Этот шаблон — запасной, если ИИ задание не вернул. К любому заданию добавляется IMAGE_SAFETY.
  */
-const IMAGE_LABELS = 'Composition: fill the whole square — large swirls in the vertical center, no big empty areas, especially below the swirls. Text in the image: the "SIGMA MIX" logo; a bold black digit centered under each swirl (1, 2, 3 from left to right) with that mix name in bold black capitals right below the digit; and the short flavor labels given above — small neat dark-grey sans-serif words placed right next to their sauce just outside the swirl, with NO leader lines, arrows or pointers. All text spelled exactly as written, never overlapping the swirls or the logo. No brand names, no percentages, no other text. No people, no hands, no hookah, no cigarettes, no smoke.';
-const IMAGE_SAFETY = 'The only text in the image is the "SIGMA MIX" logo and one small bold black digit centered under each swirl (1, 2, 3 from left to right): no other words, labels, numbers or percentages. No people, no hands, no hookah, no cigarettes, no smoke.';
+const IMAGE_TEXT_RULES = 'Text in the image: the "SIGMA MIX" logo; a bold black digit centered under each mix (1, 2, 3 from left to right) with that mix name in bold black capitals right below the digit; and the short flavor labels given above — small neat dark-grey sans-serif words placed right next to the part they describe, with NO leader lines, arrows or pointers. All text spelled exactly as written, never overlapping the visuals or the logo. No brand names, no percentages, no other text. No people, no hands, no hookah, no cigarettes, no smoke.';
+const IMAGE_LABELS = {
+  'круги': 'Composition: fill the whole square — exactly three large round sauce swirls of the same size in one row in the vertical center, no big empty areas, especially below the swirls. ' + IMAGE_TEXT_RULES,
+  'образы': 'Composition: fill the whole square — exactly three large, clearly different hero objects of similar size in one row in the vertical center, each one depicting its own mix as the dessert, drink or dish from its name; no abstract circles, no repeated shapes, no big empty areas. ' + IMAGE_TEXT_RULES,
+};
+const IMAGE_SAFETY = 'The only text in the image is the "SIGMA MIX" logo and one small bold black digit centered under each of the three mix visuals (1, 2, 3 from left to right): no other words, labels, numbers or percentages. No people, no hands, no hookah, no cigarettes, no smoke.';
 const IMAGE_TEMPLATE = {
   background: 'Square premium advertising poster for flavor mixes, top-down view, light off-white studio background with subtle minimal light-grey geometric decorations: thin outline circles, small solid triangles, plus signs, dashed lines and diagonal hatching',
   logo: 'At the top center, a modern logo: the word "SIGMA" in thin black sans-serif capitals, directly below it the word "MIX" in heavy bold black sans-serif capitals',
