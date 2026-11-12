@@ -68,6 +68,10 @@ export const DEFAULT_TEXTS = {
   strength_3: ['средняя', 'միջին', 'Крепость микса'],
   strength_4: ['средне-крепкая', 'միջին-թունդ', 'Крепость микса'],
   strength_5: ['крепкая', 'թունդ', 'Крепость микса'],
+  order_hint: ['🛒 Понравился микс? Нажми на него ниже — откроется чат с менеджером, заказ уже будет вписан.', '🛒 Հավանեցի՞ր միքսը։ Սեղմիր ներքևում՝ կբացվի զրույց մենեջերի հետ, պատվերն արդեն գրված կլինի։',
+    'Под последним миксом, над кнопками заказа'],
+  order_btn: ['🛒 Заказать: {name}', '🛒 Պատվիրել՝ {name}', 'Кнопка заказа под миксами; {name} — название микса'],
+  order_text: ['Здравствуйте! Хочу заказать табаки для микса «{name}»:', 'Բարև Ձեզ։ Ուզում եմ պատվիրել ծխախոտներ «{name}» միքսի համար․', 'Первая строка готового сообщения менеджеру'],
   pack_one: ['пачка {g} г', '{g} գ տուփ', 'Пометка у табака: в какой пачке он есть; {g} — вес пачки'],
   pack_many: ['пачки {g} г', 'տուփեր՝ {g} գ', 'Пометка у табака, если есть несколько пачек; {g} — веса через «/»'],
   pack_note: ['только пачка {g} г', 'միայն {g} գ տուփ', 'Пометка у табака, которого нет в маленькой пачке; {g} — вес пачки'],
@@ -125,6 +129,7 @@ export const DEFAULT_SETTINGS = [
     desc: 'Стиль картинки: «круги» — три круга-соуса в цветах вкусов; «образы» — три разных предмета по названиям миксов (пломбир, бокал, брауни). У каждого стиля свой раздел во вкладке «Инструкция»: «КАРТИНКА: КРУГИ» и «КАРТИНКА: ОБРАЗЫ».' },
   { key: 'image_first', def: 'да', type: 'yesno',
     desc: '«да» — картинка и текст приходят вместе, пока готовятся — бот показывает «загрузку» со сменой фраз. «нет» — сначала текст, картинка следом (быстрее).' },
+  { key: 'order_contact', def: 'yurybadalian', type: 'text', desc: 'Кому в Telegram уходит заказ: имя пользователя без @. Под миксами появляются кнопки «Заказать» с готовым текстом заказа. Пусто — кнопок нет, под миксами ссылка на магазин.' },
   { key: 'shop_url', def: 'https://vektorsigma.am', type: 'text', desc: 'Ссылка на магазин под миксами. Пусто — без ссылки.' },
   { key: 'admins', def: '', type: 'ids', desc: 'Telegram ID админов через запятую: могут /reload и /config и получают уведомления. Свой ID — команда /id у бота.' },
 ];
@@ -559,7 +564,7 @@ export function tx(cfg, lang = 'ru') {
     tooFew: g('too_few'), failed: g('failed'), more: g('btn_more'), newReq: g('btn_new'),
     strengthLabel: g('strength_label'),
     strengthNames: ['', g('strength_1'), g('strength_2'), g('strength_3'), g('strength_4'), g('strength_5')],
-    gram: g('gram'), packNote: (w) => fill(g('pack_note'), { g: w }), packOne: (w) => fill(g('pack_one'), { g: w }), packMany: (w) => fill(g('pack_many'), { g: w }), bowlNote: (gr) => fill(g('bowl_note'), { g: gr }), footer: g('footer'),
+    gram: g('gram'), packNote: (w) => fill(g('pack_note'), { g: w }), packOne: (w) => fill(g('pack_one'), { g: w }), orderHint: g('order_hint'), orderBtn: (name) => fill(g('order_btn'), { name }), orderText: (name) => fill(g('order_text'), { name }), packMany: (w) => fill(g('pack_many'), { g: w }), bowlNote: (gr) => fill(g('bowl_note'), { g: gr }), footer: g('footer'),
     llmLang: lang === 'hy' ? 'армянском (восточноармянский литературный, армянским алфавитом)' : 'русском',
   };
 }
@@ -831,7 +836,7 @@ async function onText(env, msg, ctx) {
 }
 
 /** /config — коротко, что сейчас действует. */
-const CODE_VERSION = '12.11 · 12 (плотные верхние углы вокруг логотипа)';
+const CODE_VERSION = '12.11 · 13 (кнопки «Заказать» с готовым сообщением менеджеру)';
 export function configSummary(cfg, env = {}, stock = null) {
   const at = cfg._at ? new Date(cfg._at).toLocaleString('ru-RU', { timeZone: 'Europe/Moscow', day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) + ' МСК' : 'ещё не загружалась — работают значения из кода';
   const s = cfg.settings;
@@ -904,11 +909,34 @@ function strengthKeyboard(t) {
   ], [{ text: s[3], callback_data: 'str:any' }]] };
 }
 
-function resultKeyboard(t) {
-  return { inline_keyboard: [[
-    { text: t.more, callback_data: 'more' },
-    { text: t.newReq, callback_data: 'new' },
-  ]] };
+function resultKeyboard(t, orders = []) {
+  return { inline_keyboard: [
+    ...orders.map((o) => [{ text: o.text, url: o.url }]),
+    [{ text: t.more, callback_data: 'more' }, { text: t.newReq, callback_data: 'new' }],
+  ] };
+}
+
+/**
+ * Кнопки «Заказать»: ссылка открывает чат с менеджером, в поле ввода уже стоит текст заказа —
+ * табаки этого микса и пачки (самая маленькая из тех, что есть). Клиенту остаётся нажать «Отправить».
+ */
+export function orderButtons(mixes, t, contact) {
+  const user = String(contact || '').trim().replace(/^https?:\/\/t\.me\//i, '').replace(/^@/, '');
+  if (!/^[a-z][a-z0-9_]{3,31}$/i.test(user)) return [];
+  return mixes.map((m) => {
+    const title = m.title.toLocaleUpperCase(t.lang === 'hy' ? 'hy' : 'ru');
+    const line = (p, full) => {
+      const it = p.item;
+      const w = Array.isArray(it.w) && it.w.length ? Math.min(...it.w) : 0;
+      const ln = full && it.l && it.l !== 'Основная' ? ' ' + it.l : '';
+      return `— ${it.n} · ${it.b}${ln}` + (w ? `, ${t.packOne(w)}` : '');
+    };
+    const link = (full) => `https://t.me/${user}?text=` + encodeURIComponent(t.orderText(title) + '\n' + m.parts.map((p) => line(p, full)).join('\n'));
+    let url = link(true);
+    if (url.length > 1900) url = link(false); // слишком длинная ссылка — без названий линеек
+    if (url.length > 1900) url = `https://t.me/${user}?text=` + encodeURIComponent(t.orderText(title));
+    return { text: t.orderBtn(title).slice(0, 60), url };
+  });
 }
 
 /* ═════════════════════════ Подбор миксов ═════════════════════════ */
@@ -973,18 +1001,24 @@ async function makeMixes(env, chat, session, more = false, lang = 'ru', note = '
   const bowl = cfg.settings.bowl_grams;
   const shop = cfg.settings.shop_url;
   // Одной строкой перед миксами: чего нет в наличии. Дальше миксы как обычно, без оговорок в описаниях.
+  const orders = orderButtons(result, t, cfg.settings.order_contact);
   const gone = !more && (session.missing || []).length ? esc(t.outOfStock(session.missing.map((m) => m.name).join(', '))) + '\n\n' : '';
   const text = gone + result.map((m, i) => renderMix(m, i, t, result.length, bowl)).join('\n\n') +
-    '\n\n<i>' + t.bowlNote(bowl) + '</i>\n' + t.footer + (shop ? ' ' + shop : '');
+    '\n\n<i>' + t.bowlNote(bowl) + '</i>\n' + (orders.length ? t.orderHint : t.footer + (shop ? ' ' + shop : ''));
+  // Если Telegram не принял кнопки-ссылки, клиент всё равно получает миксы — с обычными кнопками и ссылкой на магазин.
+  const sendMixes = async () => {
+    const j = await send(env, chat, text, resultKeyboard(t, orders));
+    if (orders.length && j && j.ok === false) await send(env, chat, text.replace(t.orderHint, t.footer + (shop ? ' ' + shop : '')), resultKeyboard(t));
+  };
   if (cfg.settings.images && cfg.settings.image_first) {
     // Вместе: «загрузка» крутится, пока рисуется картинка, потом сразу картинка и текст.
     const photo = await coverImage(env, result, cfg);
     await progress.stop();
     if (photo) await sendPhoto(env, chat, photo, '');
-    await send(env, chat, text, resultKeyboard(t));
+    await sendMixes();
   } else {
     await progress.stop();
-    await send(env, chat, text, resultKeyboard(t));
+    await sendMixes();
     if (cfg.settings.images) {
       await action(env, chat, 'upload_photo');
       const photo = await coverImage(env, result, cfg);
