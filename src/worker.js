@@ -941,6 +941,20 @@ async function makeMixes(env, chat, session, more = false, lang = 'ru', note = '
   const progress = await startProgress(env, chat, more ? t.pickingMore : t.picking, t.progress, note);
   await action(env, chat, 'typing');
 
+  // Клиент назвал табак, которого сейчас нет в наличии: не отказываем, а подбираем похожее по вкусу.
+  if (!session.missing) {
+    const all = await allBrandItems(env, cfg);
+    const inStock = new Set(catalog.map((x) => x.k));
+    const gone = [...new Map(all.filter((x) => !inStock.has(x.k)).map((x) => [x.k, x])).values()];
+    const hit = askedKeys(gone, session.prefs, session.text);
+    const have = askedKeys(catalog, session.prefs, session.text);
+    session.missing = have.size ? [] : gone.filter((x) => hit.has(x.k)).slice(0, 2).map((x) => ({ name: `${x.b} ${x.n}`, t: x.t, g: x.g }));
+    if (session.missing.length) {
+      session.prefs = { ...session.prefs,
+        like: [...new Set([...(session.prefs.like || []), ...session.missing.flatMap((m) => m.t)])],
+        groups: [...new Set([...(session.prefs.groups || []), ...session.missing.flatMap((m) => m.g)])] };
+    }
+  }
   const candidates = pickCandidates(catalog, session.prefs, session.used || [], more, cfg);
   if (candidates.length < 4) { await progress.stop(false); return send(env, chat, t.tooFew, resultKeyboard(t)); }
 
@@ -1097,6 +1111,7 @@ export function composePrompt(cfg, lang = 'ru') {
     // ↓ технические рамки и формат ответа: от них зависит, сможет ли бот разобрать ответ.
     'ТЕХНИЧЕСКИЕ ТРЕБОВАНИЯ:\n' +
     '- Собери ровно 3 микса ТОЛЬКО из табаков списка. Формат строки списка: номер|табак|крепость по htreviews|рейтинг|вкусы [группы].\n' +
+    '- Никогда не возвращай пустой список миксов и не проси что-то добавить. Если табака или вкуса, который назвал клиент, в списке нет — подбери самое близкое по вкусу из списка.\n' +
     `- В миксе от ${st.min_tobaccos} до ${st.max_tobaccos} табаков, доли — целые числа, кратные ${st.share_step}, в сумме ровно 100.\n` +
     (st.no_repeats ? '- Каждый табак — только в одном из трёх миксов (кроме отмеченных ★).\n' : '') +
     '- Табаки с пометкой ★ клиент назвал сам: такой табак должен быть в КАЖДОМ из трёх миксов, в разных сочетаниях.\n' +
@@ -1126,6 +1141,8 @@ async function composeMixes(env, session, candidates, lang = 'ru', cfg = DEFAULT
     'Запрос клиента: ' + session.text + '\n' +
     'Желаемая крепость: ' + want + '\n' +
     (session.titles && session.titles.length ? 'Уже предлагали, не повторяй: ' + session.titles.join('; ') + '\n' : '') +
+    ((session.missing || []).length ? 'Сейчас нет в наличии: ' + session.missing.map((m) => `${m.name} (вкус: ${m.t.join(', ') || '—'})`).join('; ') +
+      '. Не отказывай и не предлагай ждать поступления: собери три микса с максимально похожим вкусом из списка. В описании первого микса одной короткой фразой скажи, что это замена тому, что клиент просил.\n' : '') +
     '\nТабаки в наличии:\n' + lines.join('\n');
   const out = await llmJson(env, composePrompt(cfg, lang), user, 4000);
   const mixes = validateMixes(out, candidates, cfg, asked);
