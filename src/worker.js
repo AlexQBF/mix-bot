@@ -9,7 +9,7 @@
  *   «Инструкция»   — как собирать миксы и писать описания, обычным языком;
  *   «Ограничения»  — что менеджер заметил на проверке («X не сочетать с Y»), главнее инструкции;
  *   «Настройки»    — граммы, доли, повторы, крепкое только по запросу, картинки, админы;
- *   «Бренды», «Тексты бота».
+ *   «Бренды». Тексты бота — в коде (DEFAULT_TEXTS).
  * Бот раз в 15 минут (или по /reload) читает таблицу, проверяет и кладёт копию в KV.
  * Клиентские запросы в таблицу не ходят. Ошибка в таблице — работает прежняя копия.
  *
@@ -116,9 +116,6 @@ export const DEFAULT_SETTINGS = [
   { key: 'strong_only_on_request', def: 'да', type: 'yesno', desc: 'Крепкие табаки и крепкие линейки — только если клиент сам попросил крепко (да / нет).' },
   { key: 'strong_words', def: 'hard, strong, ligero, zombie, зомби, крепк, хард', type: 'list',
     desc: 'По каким словам в названии линейки или вкуса табак считается крепким. Через запятую.' },
-  { key: 'odd_only_on_request', def: 'да', type: 'yesno', desc: 'Необычные вкусы (сыр, бекон, кактус…) — только если клиент сам попросил что-то странное или назвал такой вкус (да / нет).' },
-  { key: 'odd_flavors', def: 'сыр, бекон, мяс, рыб, селед, кактус, чеснок, гриб, томат, пицц, шашлык, колбас, горчиц, кетчуп, борщ, васаби, карри, оливк, укроп, гастроном, bacon, cactus, pizza, garlic, tomato', type: 'list',
-    desc: 'По каким словам в названии или тегах табак считается необычным. Слово — начало слова: «сыр» ловит «сырный». Через запятую.' },
   { key: 'strength_memory_hours', def: '3', type: 'int', min: 0, max: 72,
     desc: 'Сколько часов бот помнит выбранную клиентом крепость и не переспрашивает в следующих запросах. 0 — спрашивать каждый раз.' },
   { key: 'only_in_stock', def: 'да', type: 'yesno', desc: 'Только то, что есть на складе (да / нет). Заработает, когда подключим выгрузку склада; до этого — все вкусы наших брендов.' },
@@ -151,6 +148,7 @@ export const DEFAULT_INSTRUCTION = [
   'Микс не должен быть однобоким. Если основа сладкая (десерт, сливки, шоколад, выпечка, орехи, карамель) — обязательно оттени её кислинкой, цитрусом или свежестью на 15–25%. Три десерта в одном миксе — нельзя, если клиент прямо не просил «чистый десерт».',
   'Яркие вкусы забивают остальные: гуава, мята, холодок, корица, кардамон, гвоздика, кофе, роза, лаванда, хвоя, эвкалипт, табак, сигара. Давай их только акцентом — до 20%, если клиент сам не просил именно этот вкус.',
   'Не ставь в один микс два почти одинаковых вкуса (две мяты, две малины), если клиент не просил усилить именно его.',
+  'Необычные и гастрономические вкусы (сыр, бекон, мясо, рыба, чеснок, грибы, томат, кактус и подобные) бери, только если клиент сам просит что-то странное, дикое, несъедобное или прямо называет такой вкус. На обычный запрос (ягоды, фрукты, свежесть, десерты, «удиви меня») такие табаки не ставь: удивлять нужно сочетанием привычных вкусов, а не едой.',
   'КРЕПОСТЬ',
   'Учитывай, как крепко курит клиент. Если лёгко или средне — табаков с крепостью «средне-крепкая» не больше 30% в миксе.',
   'Kraken на деле крепче, чем пишут на htreviews: считай его средне-крепким.',
@@ -208,9 +206,8 @@ export const SHEET_TABS = [
   { name: 'Ограничения', head: ['Ограничение', 'Кто добавил', 'Когда'] },
   { name: 'Настройки', head: ['Параметр', 'Значение', 'Что это'] },
   { name: 'Бренды', head: ['Код на htreviews', 'Название', 'Включён'] },
-  { name: 'Тексты бота', head: ['Ключ', 'Русский', 'Армянский', 'Где показывается'] },
 ];
-const SECTION_NAMES = { instruction: 'инструкция', limits: 'ограничения', settings: 'настройки', brands: 'бренды', texts: 'тексты бота' };
+const SECTION_NAMES = { instruction: 'инструкция', limits: 'ограничения', settings: 'настройки', brands: 'бренды' };
 
 /** Инструкция по разделам для таблицы: одна ячейка = заголовок БОЛЬШИМИ БУКВАМИ + текст раздела. */
 export function instructionSections(lines) {
@@ -268,7 +265,6 @@ export function sheetRows() {
     'Ограничения': [H['Ограничения'], ...DEFAULT_LIMITS.map((l) => [l.text, l.who, l.when])],
     'Настройки': [H['Настройки'], ...DEFAULT_SETTINGS.map((s) => [s.key, s.def, s.desc])],
     'Бренды': [H['Бренды'], ...DEFAULT_BRANDS.map((b) => [b.code, b.name, b.on ? 'да' : 'нет'])],
-    'Тексты бота': [H['Тексты бота'], ...MAIN_TEXT_KEYS.map((k) => [k, DEFAULT_TEXTS[k][0], DEFAULT_TEXTS[k][1], DEFAULT_TEXTS[k][2]])],
   };
 }
 
@@ -388,23 +384,8 @@ export function buildConfig(tabs) {
     cfg.brands = list;
   }
 
-  // Тексты бота
-  const tx = body('Тексты бота');
-  if (tx) {
-    for (const r of tx) {
-      const [key, ruT, hyT] = r.c;
-      if (['cover', 'mix_of', 'best'].includes(key)) { warnings.push(`Тексты бота, строка ${r.n}: «${key}» больше не используется — строку можно удалить`); continue; }
-      if (!(key in DEFAULT_TEXTS)) { warnings.push(`Тексты бота, строка ${r.n}: неизвестный ключ «${key}» — пропущен`); continue; }
-      for (const [lang, val] of [['ru', ruT], ['hy', hyT]]) {
-        if (!val) { warnings.push(`Тексты бота, строка ${r.n} (${key}, ${lang === 'ru' ? 'русский' : 'армянский'}): пусто — беру текст по умолчанию`); continue; }
-        const bad = checkHtml(val);
-        if (bad) { warnings.push(`Тексты бота, строка ${r.n} (${key}): ${bad} — беру текст по умолчанию`); continue; }
-        if (key === 'description' && val.length > 512) { warnings.push(`Тексты бота (description): длиннее 512 знаков — беру по умолчанию`); continue; }
-        if (key === 'about' && val.length > 120) { warnings.push(`Тексты бота (about): длиннее 120 знаков — беру по умолчанию`); continue; }
-        cfg.texts[key][lang] = val;
-      }
-    }
-  }
+  // Тексты бота живут только в коде (DEFAULT_TEXTS): вкладка «Тексты бота» больше не читается, её можно удалить.
+  cfg.texts = DEFAULTS.texts;
   if (cfg.instruction.length && !mixInstruction(cfg.instruction, cfg.settings.image_style).fromTable) {
     warnings.push(`Инструкция: выбран стиль картинки «${cfg.settings.image_style}», а раздела «КАРТИНКА: ${cfg.settings.image_style.toUpperCase()}» нет — рисую по тексту из кода`);
   }
@@ -433,7 +414,7 @@ export async function loadConfig(env) {
   const d = JSON.parse(JSON.stringify(DEFAULTS));
   const c = stored && stored.cfg ? stored.cfg : {};
   // Глубоко сливаем с умолчаниями: если в коде появился новый параметр или текст, а в копии его ещё нет.
-  const cfg = { ...d, ...c, settings: { ...d.settings, ...c.settings }, texts: { ...d.texts, ...c.texts }, _at: stored ? stored.at : null };
+  const cfg = { ...d, ...c, settings: { ...d.settings, ...c.settings }, texts: d.texts, _at: stored ? stored.at : null };
   cfgCache = { at: Date.now(), cfg };
   return cfg;
 }
@@ -844,7 +825,7 @@ async function onText(env, msg, ctx) {
 }
 
 /** /config — коротко, что сейчас действует. */
-const CODE_VERSION = '12.11 · 6 (необычные вкусы только по запросу)';
+const CODE_VERSION = '12.11 · 8 (необычные вкусы — правилом в инструкции, без жёсткого фильтра)';
 export function configSummary(cfg, env = {}, stock = null) {
   const at = cfg._at ? new Date(cfg._at).toLocaleString('ru-RU', { timeZone: 'Europe/Moscow', day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) + ' МСК' : 'ещё не загружалась — работают значения из кода';
   const s = cfg.settings;
@@ -867,7 +848,7 @@ export function configSummary(cfg, env = {}, stock = null) {
     `Чаша ${s.bowl_grams} г · табаков в миксе ${s.min_tobaccos}–${s.max_tobaccos} · доли кратны ${s.share_step}% · без повторов: ${yn(s.no_repeats)}\n` +
     `Стиль картинки: ${esc(s.image_style)} (${mixInstruction(cfg.instruction, s.image_style).fromTable ? 'раздел из таблицы' : 'текст из кода'})\n` +
     stockLine(stock ? { state: 'ok', ...stockStats(stock) } : null) + '\n' +
-    `Крепкое только по запросу: ${yn(s.strong_only_on_request)} · необычное только по запросу: ${yn(s.odd_only_on_request)} · только из наличия: ${yn(s.only_in_stock)} · картинки: ${yn(s.images)}\n` +
+    `Крепкое только по запросу: ${yn(s.strong_only_on_request)} · только из наличия: ${yn(s.only_in_stock)} · картинки: ${yn(s.images)}\n` +
     `Админов: ${s.admins.length + String(env.ADMIN_IDS || '').split(',').filter((x) => x.trim()).length}\n\n` +
     'Изменения в таблице подтягиваются сами раз в 15 минут, или сразу — командой /reload.';
 }
@@ -1045,7 +1026,7 @@ async function extractPrefs(env, text) {
   return {
     relevant: !out || out.relevant !== false, // если ИИ не ответил — не блокируем человека
     like: arr(out && out.like), avoid: arr(out && out.avoid), groups: arr(out && out.groups),
-    flavors: arr(out && out.flavors), brands: arr(out && out.brands), strength, odd: !!(out && out.odd === true),
+    flavors: arr(out && out.flavors), brands: arr(out && out.brands), strength,
   };
 }
 
@@ -1056,14 +1037,13 @@ export function parsePrompt(cfg, catalog = []) {
   return splitInstruction(cfg.instruction).parse.join('\n') + '\n\n' +
     'ТЕХНИЧЕСКИЕ ТРЕБОВАНИЯ:\n' +
     'Верни ТОЛЬКО JSON без пояснений:\n' +
-    '{"relevant":true,"like":[],"avoid":[],"groups":[],"flavors":[],"brands":[],"strength":"light|medium|strong|any|unknown","odd":false}\n' +
+    '{"relevant":true,"like":[],"avoid":[],"groups":[],"flavors":[],"brands":[],"strength":"light|medium|strong|any|unknown"}\n' +
     '- relevant: false, если сообщение не по теме.\n' +
     '- like — вкусы, которые клиент хочет, avoid — которых не хочет: по одному слову в именительном падеже ("Малина", "Лайм", "Мята"), ВСЕГДА по-русски (с армянского переводи).\n' +
     '- groups: подходящие направления строго из списка: ' + (groups.join(', ') || 'Фруктовый, Ягодный, Цитрусовый, Освежающий, Десертный') + '.\n' +
     '- flavors: конкретные табаки, которые клиент назвал. Если узнаёшь табак — в оригинальном написании ("Creme Brulee", "Epic Mint"), иначе как написал клиент.\n' +
     '- brands: бренды, которые клиент любит, строго из списка: ' + (brands.join(', ') || '—') + '. Написание клиента сопоставь с ближайшим брендом из списка.\n' +
-    '- strength: light — курит лёгкое, medium — среднее, strong — крепкое, any — всё равно, unknown — не сказал.\n' +
-    '- odd: true, только если клиент сам просит что-то странное, дикое, несъедобное или гастрономическое («вкус потных подмышек», «запах спортзала», «что-нибудь безумное», «сыр», «бекон»). Обычные просьбы (ягоды, фрукты, свежесть, десерты, «удиви меня») — false.';
+    '- strength: light — курит лёгкое, medium — среднее, strong — крепкое, any — всё равно, unknown — не сказал.';
 }
 
 /** Шаг 2. Код отбирает из справочника кандидатов под предпочтения. */
@@ -1084,18 +1064,9 @@ export function pickCandidates(catalog, prefs, used = [], more = false, cfg = DE
     return true; // «без разницы» / не сказал — всё, кроме крепкого
   };
 
-  // Необычное (сыр, бекон, кактус…) — только если клиент сам попросил странное или назвал такой вкус (odd_only_on_request).
-  const askedWords = norm([...prefs.like, ...flavors].join(' ')).split(/[^a-zа-я0-9]+/).filter(Boolean);
-  const okOdd = (it) => {
-    if (!st.odd_only_on_request || prefs.odd) return true;
-    const odd = oddWords(it, st.odd_flavors);
-    if (!odd.length) return true;
-    return odd.some((o) => askedWords.some((w) => w.startsWith(o))) || flavors.some((f) => similarName(f, it.n) || (it.a && similarName(f, it.a)));
-  };
-
   const scored = [];
   for (const it of catalog) {
-    if (!okStrength(it) || !okOdd(it)) continue;
+    if (!okStrength(it)) continue;
     const tagStems = it.t.map(stem);
     const nameWords = norm(it.n + ' ' + it.a).split(/[^a-zа-я0-9]+/).filter(Boolean).map(stem);
     if (avoid.some((a) => tagStems.includes(a) || nameWords.includes(a))) continue;
@@ -1197,9 +1168,16 @@ export function askedKeys(candidates, prefs, text = '') {
   // «с кэтминтом», «с брауни», «манго» — пробуем слово и без падежного окончания
   const bare = (x) => x.replace(/(ами|ями|ом|ем|ой|ей|ою|ах|ях|ов|ев|а|у|ы|и|е|ю|я)$/i, '');
   const grams = [...w, ...w.map(bare).filter((x) => x.length >= 4), ...w.slice(0, -1).map((x, i) => x + ' ' + w[i + 1])];
-  const inText = (name) => !!name && grams.some((g) => similarName(g, name));
+  // Название должно быть в тексте ЦЕЛИКОМ. Одного общего слова мало: «потный вайб» — это не табак «Заельцовский вайб»,
+  // а «с мятой» — не «Марокканская мята». Иначе бот ставит такой табак во все миксы или объявляет, что его нет в наличии.
+  const inText = (name) => {
+    if (!name) return false;
+    if (grams.some((g) => sameName(g, name))) return true;
+    const nw = words(name).filter((x) => x.length >= 2);
+    return nw.length > 1 && nw.every((x) => grams.some((g) => sameName(g, x)));
+  };
   const flavors = ((prefs && prefs.flavors) || []).filter(inText);
-  const hits = candidates.filter((it) => inText(it.n) || inText(it.a) || flavors.some((f) => similarName(f, it.n) || (it.a && similarName(f, it.a))));
+  const hits = candidates.filter((it) => inText(it.n) || inText(it.a) || flavors.some((f) => sameName(f, it.n) || (it.a && sameName(f, it.a))));
   // Больше двух обязательных табаков в каждом миксе — уже не микс: оставляем два самых рейтинговых.
   return new Set(hits.sort((x, y) => (y.r || 0) - (x.r || 0)).slice(0, 2).map((it) => it.k));
 }
@@ -1617,11 +1595,6 @@ const d=document.createElement('p');d.textContent='Готово.';log.append(d);
 
 const norm = (s) => String(s || '').toLowerCase().replace(/ё/g, 'е').trim();
 
-/** Слова из настройки odd_flavors, по которым табак считается необычным: смотрим теги, направления, название. */
-export const oddWords = (it, words = DEFAULTS.settings.odd_flavors) => {
-  const ws = norm([...(it.t || []), ...(it.g || []), it.n, it.a].join(' ')).split(/[^a-zа-я0-9]+/).filter(Boolean);
-  return (words || []).map(norm).filter((o) => o && ws.some((w) => w.startsWith(o)));
-};
 /** Крепкие линейки по словам из настройки strong_words: Хулиган Hard, Kraken Strong Ligero, Хулиган Зомби и т.п. */
 export const isStrongLine = (it, words = DEFAULTS.settings.strong_words) => {
   const x = norm((it.l || '') + ' ' + (it.n || ''));
@@ -1641,6 +1614,19 @@ const skel = (s) => squash(s).replace(/dzh/g, 'g').replace(/j/g, 'g').replace(/k
   .replace(/w/g, 'v').replace(/x/g, 'ks').replace(/[aeiouy]/g, '').replace(/(.)\1+/g, '$1');
 
 /** Похожи ли названия с учётом опечаток и транслита: «креме брюле» ≈ «Creme Brulee», «эпик минт» ≈ «Epic Mint». */
+/** То же название целиком (с опечатками и транслитом), без правила «одно слово из названия». */
+export function sameName(a, b) {
+  const x = squash(a), y = squash(b);
+  if (x.length < 3 || y.length < 3) return false;
+  if (x === y) return true;
+  const sx = skel(a), sy = skel(b);
+  if (sx.length >= 4 && sy.length >= 4) {
+    if (sx === sy) return true;
+    if (Math.min(sx.length, sy.length) >= 6 && Math.abs(sx.length - sy.length) <= 1 && editDistance(sx, sy) <= 1) return true;
+  }
+  if (Math.abs(x.length - y.length) > 2) return false;
+  return editDistance(x, y) <= (Math.min(x.length, y.length) >= 10 ? 2 : x.length >= 5 ? 1 : 0);
+}
 export function similarName(a, b) {
   const x = squash(a), y = squash(b);
   if (x.length < 3 || y.length < 3) return false;
