@@ -97,8 +97,12 @@ const MAIN_TEXT_KEYS = ['hello', 'choose_lang', 'lang_set', 'ask_strength', 'str
 
 // Настройки: то, что код гарантирует сам, независимо от ИИ. Видно и меняется в таблице.
 export const DEFAULT_SETTINGS = [
-  { key: 'brains', def: 'платные', type: 'choice', options: { 'платные': ['платные', 'платно', 'paid', 'да'], 'бесплатные': ['бесплатные', 'бесплатно', 'free', 'нет'] },
-    desc: 'Какие мозги работают: «платные» — Claude + картинки ChatGPT (модели и ключи — в wrangler.toml), «бесплатные» — Cloudflare: Llama и FLUX, как было раньше.' },
+  { key: 'text_ai', def: 'chatgpt', type: 'choice',
+    options: { chatgpt: ['chatgpt', 'gpt', 'openai', 'чатгпт', 'чат гпт', 'чат-гпт'], claude: ['claude', 'клод', 'anthropic'], 'бесплатно': ['бесплатно', 'бесплатные', 'free', 'cloudflare', 'llama'] },
+    desc: 'Кто собирает миксы и пишет тексты: «chatgpt», «claude» или «бесплатно» (Llama на Cloudflare). Модели — в wrangler.toml.' },
+  { key: 'image_ai', def: 'chatgpt', type: 'choice',
+    options: { chatgpt: ['chatgpt', 'gpt', 'openai', 'чатгпт', 'чат гпт', 'чат-гпт'], 'бесплатно': ['бесплатно', 'бесплатные', 'free', 'cloudflare', 'flux'] },
+    desc: 'Кто рисует картинку: «chatgpt» или «бесплатно» (FLUX на Cloudflare). Claude картинки не рисует.' },
   { key: 'bowl_grams', def: '20', type: 'int', min: 5, max: 60, desc: 'Сколько грамм в чаше. Граммы каждого табака = его доля × чаша.' },
   { key: 'min_tobaccos', def: '2', type: 'int', min: 2, max: 6, desc: 'Минимум табаков в одном миксе.' },
   { key: 'max_tobaccos', def: '4', type: 'int', min: 2, max: 6, desc: 'Максимум табаков в одном миксе.' },
@@ -138,9 +142,12 @@ export const DEFAULT_INSTRUCTION = [
   'КРЕПОСТЬ',
   'Учитывай, как крепко курит клиент. Если лёгко или средне — табаков с крепостью «средне-крепкая» не больше 30% в миксе.',
   'Kraken на деле крепче, чем пишут на htreviews: считай его средне-крепким.',
-  'ОПИСАНИЯ',
-  'Название микса — 2–3 слова, аппетитно, как десерт или коктейль: «Аперольный закат», «Игристые тропики», «Черничный чизкейк», «Апельсиновый брауни».',
-  'Описание — 1–2 предложения, до 30 слов, на «ты». У каждого вкуса — сочный эпитет (спелый, тягучий, ледяной, бархатный), скажи, чем вкусы дополняют друг друга и какое ощущение в итоге. Без воды вроде «гармоничный опыт», без обещаний про здоровье. Описание должно честно соответствовать вкусам.',
+  'ИДЕЯ, НАЗВАНИЕ, ОПИСАНИЕ',
+  'Клиент приходит за «отвалом башки», а не за списком табаков. Каждый микс — узнаваемый образ, который можно представить на вкус ещё до первой затяжки: коктейль, напиток, десерт, блюдо. Простой микс из двух вкусов — понятная классика: «Виски-кола». Сложный из трёх-четырёх — как продуманный коктейль: «Виски сауэр» — виски, лимон, сладкий сироп, шелковистая пенка.',
+  'Сначала придумай образ, потом подбери табаки, которые его складывают, — а не наоборот. Образ собирай только из табаков, которые есть в списке; если для образа чего-то не хватает — выбери другой образ, не натягивай.',
+  'Хотя бы один из трёх миксов должен удивлять: неожиданное, но логичное сочетание, до которого клиент сам бы не додумался.',
+  'Название — это и есть образ: 1–3 слова, сразу рисует картинку и вкус («Виски сауэр», «Малиновый мохито», «Тирамису на террасе», «Пина колада»). Не перечисляй табаки в названии: «Кэтминт с лимоном» — плохо.',
+  'Описание — 1–2 предложения, до 30 слов, на «ты». Чувственно и соблазнительно: какая первая затяжка, текстура, температура, послевкусие. Сочные эпитеты (тягучий, ледяной, бархатный, искрящийся), без воды и канцелярита, без обещаний про здоровье. Описание честно соответствует вкусам в миксе.',
   'Примеры наших описаний: «Яркий гранатовый апероль, сочный апельсин и нежный белый персик создают летний коктейльный вкус с мягкой горчинкой.» «Насыщенная ежевика с винной ноткой сочетается со сливочным черничным йогуртом, а медовый персик делает вкус мягким и округлым.» «Лёгкое игристое вино, сочный манго-ананас и яркая цитрусовая кислинка юдзу создают освежающий тропический вкус.»',
   'КАРТИНКА',
   'Одна квадратная картинка на все три микса, премиальная рекламная фуд-съёмка сверху. Светлый почти белый фон с лёгкой серой геометрией: тонкие круги, треугольники, плюсики, пунктир, штриховка.',
@@ -310,6 +317,7 @@ export function buildConfig(tabs) {
   if (st) {
     for (const r of st) {
       const def = DEFAULT_SETTINGS.find((d) => d.key === r.c[0]);
+      if (r.c[0] === 'brains') { warnings.push(`Настройки, строка ${r.n}: «brains» больше не используется — вместо неё text_ai и image_ai. Строку можно удалить`); continue; }
       if (!def) { warnings.push(`Настройки, строка ${r.n}: неизвестный параметр «${r.c[0]}» — пропущен`); continue; }
       const p = parseSetting(def, r.c[1]);
       if (p.error) errors.push(`Настройки, строка ${r.n} (${def.key}): ${p.error}`);
@@ -523,15 +531,35 @@ const PAGE = 20; // сайт сам грузит по 20, большие пор�
 const STRENGTH = { 'лёгкая': 1, 'легкая': 1, 'средне-лёгкая': 2, 'средне-легкая': 2, 'средняя': 3, 'средне-крепкая': 4, 'крепкая': 5 };
 const STRENGTH_NAME = ['', 'лёгкая', 'средне-лёгкая', 'средняя', 'средне-крепкая', 'крепкая'];
 const CRON_CONFIG = '*/15 * * * *';
-// Бесплатные мозги Cloudflare — для настройки brains = «бесплатные» и как запасной вариант, если платный ИИ не ответил.
+// Бесплатные мозги Cloudflare — для «бесплатно» в text_ai / image_ai и как запасной вариант, если платный ИИ не ответил.
 const FREE_LLM = '@cf/meta/llama-3.3-70b-instruct-fp8-fast';
 const FREE_IMAGE = '@cf/black-forest-labs/flux-2-klein-4b';
 
-/** Мозги с учётом настройки brains из таблицы: «бесплатные» — всё на Cloudflare, «платные» — как в wrangler.toml. */
+/**
+ * Кто работает — решает таблица (text_ai, image_ai), какие именно модели — wrangler.toml.
+ * Ключи: OpenAI — секрет OPENAI_API_KEY или IMAGE_API_KEY; Anthropic — ANTHROPIC_API_KEY или LLM_API_KEY.
+ */
 export function applyBrains(env, cfg) {
-  if (!cfg || !cfg.settings || cfg.settings.brains !== 'бесплатные') return env;
-  return { ...env, LLM_PROVIDER: 'cloudflare', LLM_MODEL: FREE_LLM, LLM_MODEL_FAST: '', IMAGE_PROVIDER: 'cloudflare', IMAGE_MODEL: FREE_IMAGE };
+  const s = (cfg && cfg.settings) || {};
+  const text = s.text_ai || 'chatgpt', image = s.image_ai || 'chatgpt';
+  const openaiKey = env.OPENAI_API_KEY || env.IMAGE_API_KEY;
+  const e = { ...env };
+  if (text === 'claude') {
+    Object.assign(e, { LLM_PROVIDER: 'anthropic', LLM_MODEL: env.CLAUDE_MODEL || 'claude-sonnet-5-5', LLM_MODEL_FAST: env.CLAUDE_MODEL_FAST || 'claude-haiku-5-5',
+      LLM_API_KEY: env.ANTHROPIC_API_KEY || env.LLM_API_KEY, LLM_BASE_URL: '' });
+  } else if (text === 'chatgpt') {
+    Object.assign(e, { LLM_PROVIDER: 'openai', LLM_MODEL: env.OPENAI_MODEL || 'gpt-6.1-terra', LLM_MODEL_FAST: env.OPENAI_MODEL_FAST || 'gpt-6-luna',
+      LLM_API_KEY: openaiKey, LLM_BASE_URL: '' });
+  } else {
+    Object.assign(e, { LLM_PROVIDER: 'cloudflare', LLM_MODEL: FREE_LLM, LLM_MODEL_FAST: '' });
+  }
+  if (image === 'chatgpt') Object.assign(e, { IMAGE_PROVIDER: 'openai', IMAGE_MODEL: env.OPENAI_IMAGE_MODEL || 'gpt-image-2.5-flare', IMAGE_API_KEY: openaiKey });
+  else Object.assign(e, { IMAGE_PROVIDER: 'cloudflare', IMAGE_MODEL: FREE_IMAGE });
+  return e;
 }
+
+/** Для тестов: сбросить кэш настроек и справочника в памяти. */
+export function resetCaches() { cfgCache = { at: 0, cfg: null }; catCache = { at: 0, sig: '', items: [] }; }
 // Сколько подходящих табаков показываем ИИ на выбор, и сколько «для баланса» (свежесть, цитрус, ягоды).
 const CANDIDATES = 60;
 const HELPERS = 15;
@@ -728,8 +756,8 @@ export function configSummary(cfg, env = {}) {
     `Таблица: ${env.CONFIG_SHEET_ID ? `<a href="https://docs.google.com/spreadsheets/d/${env.CONFIG_SHEET_ID}/edit">открыть</a>` : 'не подключена'}\n` +
     `Последнее изменение из таблицы: ${at}\n` +
     `Журнал и чтение таблицы через скрипт Google: ${env.SHEET_SCRIPT_URL ? (env.SHEET_SECRET ? 'подключено' : 'адрес есть, но нет секрета SHEET_SECRET') : 'не подключено (SHEET_SCRIPT_URL пустой)'}\n` +
-    `Режим мозгов (brains): <b>${esc(s.brains)}</b>\n` +
-    `Мозги: ${esc(e.LLM_PROVIDER || 'cloudflare')} · ${esc(e.LLM_MODEL || 'llama-3.3-70b')}` +
+    `В таблице: тексты — <b>${esc(s.text_ai)}</b>, картинки — <b>${esc(s.image_ai)}</b>\n` +
+    `Тексты: ${esc(e.LLM_PROVIDER || 'cloudflare')} · ${esc(e.LLM_MODEL || 'llama-3.3-70b')}` +
     (e.LLM_MODEL_FAST ? ` (разбор запроса — ${esc(e.LLM_MODEL_FAST)})` : '') + '\n' +
     `Картинки: ${esc(e.IMAGE_PROVIDER || 'cloudflare')} · ${esc(e.IMAGE_MODEL || 'flux-2-klein-4b')}` +
     (e.IMAGE_PROVIDER === 'openai' ? ` · качество ${esc(e.IMAGE_QUALITY || 'medium')}` : '') + '\n\n' +
@@ -861,7 +889,7 @@ async function extractPrefs(env, text) {
   const catalog = await loadCatalog(env);
   const system = parsePrompt(cfg, catalog);
   // Разбор — простая задача: можно отдать быстрой дешёвой модели (LLM_MODEL_FAST), сборку — умной (LLM_MODEL).
-  const fastEnv = env.LLM_MODEL_FAST ? { ...env, LLM_MODEL: env.LLM_MODEL_FAST } : env;
+  const fastEnv = env.LLM_MODEL_FAST ? { ...env, LLM_MODEL: env.LLM_MODEL_FAST, LLM_EFFORT: env.OPENAI_EFFORT_FAST || 'none' } : env;
   const out = await llmJson(fastEnv, system, text, 400);
   const arr = (v) => (Array.isArray(v) ? v.filter((x) => typeof x === 'string' && x.trim()).map((x) => x.trim()).slice(0, 12) : []);
   const strength = ['light', 'medium', 'strong', 'any', 'unknown'].includes(out && out.strength) ? out.strength : 'unknown';
@@ -1112,8 +1140,30 @@ async function llm(env, system, user, maxTokens) {
     if (!out) throw new Error('anthropic: пустой ответ, stop_reason=' + j.stop_reason);
     return out;
   }
+  if (provider === 'openai' && !env.LLM_BASE_URL) {
+    // Модели GPT-6 «думают» перед ответом: effort — сколько. low — хороший баланс для миксов, none — для простого разбора.
+    const call = async (effort) => {
+      const r = await fetch('https://api.openai.com/v1/responses', {
+        method: 'POST',
+        headers: { authorization: 'Bearer ' + env.LLM_API_KEY, 'content-type': 'application/json' },
+        body: JSON.stringify({ model, instructions: system, input: user, reasoning: { effort },
+          max_output_tokens: maxTokens + (effort === 'none' ? 0 : 6000) }),
+      });
+      return { r, j: await r.json().catch(() => ({})) };
+    };
+    const effort = env.LLM_EFFORT || env.OPENAI_EFFORT || 'low';
+    let { r, j } = await call(effort);
+    // Модель не умеет effort=none (например, GPT-6.1 Sol) — повторяем с low.
+    if (!r.ok && effort === 'none' && /effort|reasoning/i.test(JSON.stringify(j))) ({ r, j } = await call('low'));
+    if (!r.ok) throw new Error('openai ' + r.status + ' ' + JSON.stringify(j).slice(0, 400));
+    const out = typeof j.output_text === 'string' && j.output_text ? j.output_text
+      : (j.output || []).filter((o) => o.type === 'message').flatMap((o) => o.content || []).filter((c) => c.type === 'output_text').map((c) => c.text || '').join('');
+    if (!out) throw new Error('openai: пустой ответ, status=' + j.status + (j.incomplete_details ? ' ' + JSON.stringify(j.incomplete_details) : ''));
+    return out;
+  }
   if (provider === 'openai') {
-    const base = (env.LLM_BASE_URL || 'https://api.openai.com/v1').replace(/\/$/, '');
+    // Совместимые с OpenAI сервисы (LLM_BASE_URL задан) — старый формат chat/completions.
+    const base = env.LLM_BASE_URL.replace(/\/$/, '');
     const r = await fetch(base + '/chat/completions', {
       method: 'POST',
       headers: { authorization: 'Bearer ' + env.LLM_API_KEY, 'content-type': 'application/json' },
