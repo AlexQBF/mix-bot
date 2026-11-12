@@ -804,8 +804,13 @@ async function onText(env, msg, ctx) {
     if (session.askId) await tg(env, 'deleteMessage', { chat_id: chat, message_id: session.askId }).catch(() => {});
   }
   await action(env, chat, 'typing');
-  const prefs = await extractPrefs(env, request);
+  // Продолжение разговора: «то же самое, только лёгкое», «а без мяты?». Показываем разбору прошлый запрос —
+  // он сам решает, продолжение это или новая тема. Кнопка «Новый запрос» прошлый запрос стирает.
+  const prev = session && session.stage === 'done' && session.text ? String(session.text) : '';
+  const prefs = await extractPrefs(env, request, force ? '' : prev);
   if (!prefs.relevant) return send(env, chat, t.notRelevant);
+  const carry = prev && prefs.followup ? { used: session.used || [], titles: session.titles || [] } : { used: [], titles: [] };
+  if (prev && prefs.followup) request = (prev + '\n' + text).slice(-1500);
   let note = '';
   if (prefs.strength !== 'unknown') {
     await rememberStrength(env, chat, prefs.strength); // назвал сам — запоминаем
@@ -821,11 +826,11 @@ async function onText(env, msg, ctx) {
     }
   }
   if (prefs.strength === 'unknown') prefs.strength = 'any';
-  await makeMixes(env, chat, { text: request, prefs, used: [], titles: [] }, false, lang, note);
+  await makeMixes(env, chat, { text: request, prefs, ...carry }, false, lang, note);
 }
 
 /** /config — коротко, что сейчас действует. */
-const CODE_VERSION = '12.11 · 8 (необычные вкусы — правилом в инструкции, без жёсткого фильтра)';
+const CODE_VERSION = '12.11 · 9 (бот помнит прошлый запрос: «то же самое, только лёгкое»)';
 export function configSummary(cfg, env = {}, stock = null) {
   const at = cfg._at ? new Date(cfg._at).toLocaleString('ru-RU', { timeZone: 'Europe/Moscow', day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) + ' МСК' : 'ещё не загружалась — работают значения из кода';
   const s = cfg.settings;
@@ -1013,37 +1018,39 @@ async function coverImage(env, mixes, cfg) {
 }
 
 /** Шаг 1. ИИ превращает свободный текст в структуру предпочтений. */
-async function extractPrefs(env, text) {
+async function extractPrefs(env, text, prev = '') {
   const cfg = await loadConfig(env);
   env = applyBrains(env, cfg);
   const catalog = await loadCatalog(env);
-  const system = parsePrompt(cfg, catalog);
+  const system = parsePrompt(cfg, catalog, !!prev);
   // Разбор — простая задача: можно отдать быстрой дешёвой модели (LLM_MODEL_FAST), сборку — умной (LLM_MODEL).
   const fastEnv = env.LLM_MODEL_FAST ? { ...env, LLM_MODEL: env.LLM_MODEL_FAST, LLM_EFFORT: env.OPENAI_EFFORT_FAST || 'none' } : env;
-  const out = await llmJson(fastEnv, system, text, 400);
+  const input = prev ? 'ПРЕДЫДУЩИЙ ЗАПРОС КЛИЕНТА (на него уже ответили):\n' + prev + '\n\nНОВОЕ СООБЩЕНИЕ КЛИЕНТА:\n' + text : text;
+  const out = await llmJson(fastEnv, system, input, 400);
   const arr = (v) => (Array.isArray(v) ? v.filter((x) => typeof x === 'string' && x.trim()).map((x) => x.trim()).slice(0, 12) : []);
   const strength = ['light', 'medium', 'strong', 'any', 'unknown'].includes(out && out.strength) ? out.strength : 'unknown';
   return {
     relevant: !out || out.relevant !== false, // если ИИ не ответил — не блокируем человека
     like: arr(out && out.like), avoid: arr(out && out.avoid), groups: arr(out && out.groups),
-    flavors: arr(out && out.flavors), brands: arr(out && out.brands), strength,
+    flavors: arr(out && out.flavors), brands: arr(out && out.brands), strength, followup: !!(prev && out && out.followup === true),
   };
 }
 
 /** Задание для шага 1: раздел «РАЗБОР ЗАПРОСА» из таблицы + формат ответа (он в коде — от него зависит, поймёт ли бот ответ). */
-export function parsePrompt(cfg, catalog = []) {
+export function parsePrompt(cfg, catalog = [], withPrev = false) {
   const brands = [...new Set(catalog.map((x) => x.b))];
   const groups = [...new Set(catalog.flatMap((x) => x.g))];
   return splitInstruction(cfg.instruction).parse.join('\n') + '\n\n' +
     'ТЕХНИЧЕСКИЕ ТРЕБОВАНИЯ:\n' +
     'Верни ТОЛЬКО JSON без пояснений:\n' +
-    '{"relevant":true,"like":[],"avoid":[],"groups":[],"flavors":[],"brands":[],"strength":"light|medium|strong|any|unknown"}\n' +
+    '{"relevant":true,"like":[],"avoid":[],"groups":[],"flavors":[],"brands":[],"strength":"light|medium|strong|any|unknown"' + (withPrev ? ',"followup":false' : '') + '}\n' +
     '- relevant: false, если сообщение не по теме.\n' +
     '- like — вкусы, которые клиент хочет, avoid — которых не хочет: по одному слову в именительном падеже ("Малина", "Лайм", "Мята"), ВСЕГДА по-русски (с армянского переводи).\n' +
     '- groups: подходящие направления строго из списка: ' + (groups.join(', ') || 'Фруктовый, Ягодный, Цитрусовый, Освежающий, Десертный') + '.\n' +
     '- flavors: конкретные табаки, которые клиент назвал. Если узнаёшь табак — в оригинальном написании ("Creme Brulee", "Epic Mint"), иначе как написал клиент.\n' +
     '- brands: бренды, которые клиент любит, строго из списка: ' + (brands.join(', ') || '—') + '. Написание клиента сопоставь с ближайшим брендом из списка.\n' +
-    '- strength: light — курит лёгкое, medium — среднее, strong — крепкое, any — всё равно, unknown — не сказал.';
+    '- strength: light — курит лёгкое, medium — среднее, strong — крепкое, any — всё равно, unknown — не сказал.' +
+    (withPrev ? '\n- followup: тебе дан предыдущий запрос клиента и его новое сообщение. true — если новое сообщение продолжает или уточняет предыдущий запрос («то же самое, только лёгкое», «такое же направление», «а без мяты?», «ещё что-нибудь такое»): тогда вкусы, табаки и общую идею бери из ОБОИХ сообщений вместе, а там, где они расходятся (крепость, «без …»), главнее новое. false — если новое сообщение само по себе полная новая просьба: тогда предыдущий запрос не учитывай вообще.' : '');
 }
 
 /** Шаг 2. Код отбирает из справочника кандидатов под предпочтения. */
