@@ -1069,7 +1069,7 @@ export function composePrompt(cfg, lang = 'ru') {
 }
 
 async function composeMixes(env, session, candidates, lang = 'ru', cfg = DEFAULTS) {
-  const asked = askedKeys(candidates, session.prefs);
+  const asked = askedKeys(candidates, session.prefs, session.text);
   const lines = candidates.map((it, i) =>
     `${asked.has(it.k) ? '★' : ''}${i + 1}|${it.b}${it.l && it.l !== 'Основная' ? ' ' + it.l : ''} — ${it.n}${it.a ? ' (' + it.a + ')' : ''}|` +
     `${STRENGTH_NAME[effStrength(it, cfg.settings.strong_words)] || '?'}|${it.c >= 3 ? it.r : '-'}|${it.t.join(', ')}${it.g.length ? ' [' + it.g.join(', ') + ']' : ''}`);
@@ -1096,9 +1096,18 @@ async function composeMixes(env, session, candidates, lang = 'ru', cfg = DEFAULT
  * без повторов табаков между миксами (no_repeats).
  */
 /** Табаки, которые клиент назвал сам («миксы с Кэтминтом»): их ставим во все три микса, повторы для них разрешены. */
-export function askedKeys(candidates, prefs) {
-  const flavors = (prefs && prefs.flavors) || [];
-  return new Set(candidates.filter((it) => flavors.some((f) => similarName(f, it.n) || (it.a && similarName(f, it.a)))).map((it) => it.k));
+export function askedKeys(candidates, prefs, text = '') {
+  // Берём только то, что клиент действительно написал сам: название должно встречаться в его сообщении
+  // (с опечатками и транслитом). Иначе ИИ на шаге разбора может «додумать» табаки — и мы заставим ставить их везде.
+  const w = String(text).toLowerCase().split(/[^a-zа-яёԱ-֏0-9]+/i).filter((x) => x.length >= 3);
+  // «с кэтминтом», «с брауни», «манго» — пробуем слово и без падежного окончания
+  const bare = (x) => x.replace(/(ами|ями|ом|ем|ой|ей|ою|ах|ях|ов|ев|а|у|ы|и|е|ю|я)$/i, '');
+  const grams = [...w, ...w.map(bare).filter((x) => x.length >= 4), ...w.slice(0, -1).map((x, i) => x + ' ' + w[i + 1])];
+  const inText = (name) => !!name && grams.some((g) => similarName(g, name));
+  const flavors = ((prefs && prefs.flavors) || []).filter(inText);
+  const hits = candidates.filter((it) => inText(it.n) || inText(it.a) || flavors.some((f) => similarName(f, it.n) || (it.a && similarName(f, it.a))));
+  // Больше двух обязательных табаков в каждом миксе — уже не микс: оставляем два самых рейтинговых.
+  return new Set(hits.sort((x, y) => (y.r || 0) - (x.r || 0)).slice(0, 2).map((it) => it.k));
 }
 
 export function validateMixes(out, candidates, cfg = DEFAULTS, asked = new Set()) {
