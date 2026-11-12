@@ -52,7 +52,10 @@ export const DEFAULT_TEXTS = {
   btn_medium: ['⚖️ Средне', '⚖️ Միջին', 'Кнопка крепости'],
   btn_strong: ['🔥 Крепко', '🔥 Թունդ', 'Кнопка крепости'],
   btn_any: ['Без разницы', 'Միևնույն է', 'Кнопка крепости'],
-  picking: ['🔎 Подбираю миксы…', '🔎 Միքսեր եմ ընտրում…', 'Пока бот думает'],
+  picking: ['🔎 Подбираю миксы…', '🔎 Միքսեր եմ ընտրում…', 'Пока бот думает — первая фраза'],
+  progress: ['📦 Шуршим пакетиками с табаком… | 👃 Принюхиваемся к вкусам… | ⚖️ Отмеряем граммы… | 🧪 Пробуем сочетания… | 🔥 Раздуваем угли… | 🎨 Рисуем твои миксы… | 💨 Почти готово, выдыхаем…',
+    '📦 Խշխշացնում ենք ծխախոտի տուփերը… | 👃 Հոտոտում ենք համերը… | ⚖️ Չափում ենք գրամները… | 🧪 Փորձում ենք համադրությունները… | 🔥 Վառում ենք ածուխները… | 🎨 Նկարում ենք քո միքսերը… | 💨 Գրեթե պատրաստ է…',
+    'Фразы, которые сменяют друг друга, пока бот думает. Разделяются знаком |'],
   strength_remembered: ['Крепость — как в прошлый раз: {s}. Захочешь иначе — просто напиши.', 'Թնդությունը՝ նախորդի պես․ {s}։ Եթե ուզում ես այլ կերպ, պարզապես գրիր։',
     'Под «Подбираю миксы…», если бот взял крепость из прошлого запроса'],
   picking_more: ['🔄 Думаю над другими вариантами…', '🔄 Մտածում եմ այլ տարբերակների մասին…', 'После кнопки «Ещё варианты»'],
@@ -89,7 +92,7 @@ export const DEFAULT_TEXTS = {
 };
 
 // Какие тексты показываем в таблице (остальные — служебные, живут в коде, но их тоже можно добавить строкой в таблицу).
-const MAIN_TEXT_KEYS = ['hello', 'choose_lang', 'lang_set', 'ask_strength', 'strength_remembered', 'btn_light', 'btn_medium', 'btn_strong', 'btn_any',
+const MAIN_TEXT_KEYS = ['hello', 'choose_lang', 'lang_set', 'picking', 'progress', 'ask_strength', 'strength_remembered', 'btn_light', 'btn_medium', 'btn_strong', 'btn_any',
   'strength_label', 'bowl_note', 'footer', 'btn_more', 'btn_new', 'description', 'about'];
 
 // Настройки: то, что код гарантирует сам, независимо от ИИ. Видно и меняется в таблице.
@@ -112,8 +115,8 @@ export const DEFAULT_SETTINGS = [
     desc: 'Сколько часов бот помнит выбранную клиентом крепость и не переспрашивает в следующих запросах. 0 — спрашивать каждый раз.' },
   { key: 'only_in_stock', def: 'да', type: 'yesno', desc: 'Только то, что есть на складе (да / нет). Заработает, когда подключим выгрузку склада; до этого — все вкусы наших брендов.' },
   { key: 'images', def: 'да', type: 'yesno', desc: 'Рисовать картинку к миксам (да / нет). Как она выглядит — во вкладке «Инструкция».' },
-  { key: 'image_first', def: 'нет', type: 'yesno',
-    desc: '«нет» — сначала текст с миксами, картинка приходит следом (клиент не ждёт, пока она рисуется). «да» — сначала картинка, потом текст.' },
+  { key: 'image_first', def: 'да', type: 'yesno',
+    desc: '«да» — картинка и текст приходят вместе, пока готовятся — бот показывает «загрузку» со сменой фраз. «нет» — сначала текст, картинка следом (быстрее).' },
   { key: 'shop_url', def: 'https://vektorsigma.am', type: 'text', desc: 'Ссылка на магазин под миксами. Пусто — без ссылки.' },
   { key: 'admins', def: '', type: 'ids', desc: 'Telegram ID админов через запятую: могут /reload и /config и получают уведомления. Свой ID — команда /id у бота.' },
 ];
@@ -150,8 +153,9 @@ export const DEFAULT_INSTRUCTION = [
   'Примеры наших описаний: «Яркий гранатовый апероль, сочный апельсин и нежный белый персик создают летний коктейльный вкус с мягкой горчинкой.» «Насыщенная ежевика с винной ноткой сочетается со сливочным черничным йогуртом, а медовый персик делает вкус мягким и округлым.» «Лёгкое игристое вино, сочный манго-ананас и яркая цитрусовая кислинка юдзу создают освежающий тропический вкус.»',
   'КАРТИНКА',
   'Одна квадратная картинка на все три микса, премиальная рекламная фуд-съёмка сверху. Светлый почти белый фон с лёгкой серой геометрией: тонкие круги, треугольники, плюсики, пунктир, штриховка.',
-  'Сверху по центру логотип: слово SIGMA тонкими чёрными буквами, под ним MIX жирными чёрными буквами. Другого текста на картинке нет: ни названий, ни процентов.',
+  'Сверху по центру логотип: слово SIGMA тонкими чёрными буквами, под ним MIX жирными чёрными буквами. Кроме логотипа, цифр и подписей вкусов, текста на картинке нет.',
   'Под логотипом в один ряд три круга одинакового размера — микс 1, 2, 3 слева направо. Каждый круг — густые глянцевые соусы цвета вкусов микса, перетекающие друг в друга как инь-ян, с капелькой снизу. Под каждым кругом по центру — его номер: аккуратная чёрная цифра 1, 2, 3 тем же шрифтом, что MIX, чтобы картинка совпадала с номерами миксов в тексте.',
+  'От каждого соуса в круге — тонкая линия-выноска к короткой подписи вкуса: «печенье», «карамель», «лимон». Подписи мелкие, аккуратные, тёмно-серые, не перекрывают круги и логотип. Только вкусы: без брендов и процентов.',
   'По краям кадра свежие ингредиенты миксов, частично обрезанные краем. Сочные цвета, мягкие тени, много воздуха. Без людей, рук, кальянов, сигарет и дыма.',
   // Этот раздел идёт не миксологу, а на первый шаг — разбор сообщения клиента. Бот находит его по названию.
   'РАЗБОР ЗАПРОСА',
@@ -514,6 +518,7 @@ export function tx(cfg, lang = 'ru') {
     strength: [g('btn_light'), g('btn_medium'), g('btn_strong'), g('btn_any')],
     notRelevant: g('not_relevant'), notText: g('not_text'), error: g('error'), restart: g('restart'), expired: g('expired'),
     tellFirst: g('tell_first'), noCatalog: g('no_catalog'), picking: g('picking'), pickingMore: g('picking_more'),
+    progress: g('progress').split('|').map((x) => x.trim()).filter(Boolean),
     strengthRemembered: (s) => fill(g('strength_remembered'), { s }),
     tooFew: g('too_few'), failed: g('failed'), more: g('btn_more'), newReq: g('btn_new'),
     strengthLabel: g('strength_label'),
@@ -821,6 +826,26 @@ function resultKeyboard(t) {
 
 /* ═════════════════════════ Подбор миксов ═════════════════════════ */
 
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+/** Сообщение-«загрузка»: каждые ~2,5 с меняет фразу, пока бот работает. stop() убирает его. */
+async function startProgress(env, chat, first, phrases, note = '') {
+  const tail = note ? '\n<i>' + esc(note) + '</i>' : '';
+  const j = await send(env, chat, first + tail);
+  const id = j && j.result && j.result.message_id;
+  let done = false;
+  if (id && phrases.length) {
+    (async () => {
+      for (let i = 0; !done && i < 40; i++) {
+        await sleep(2500);
+        if (done) break;
+        await tg(env, 'editMessageText', { chat_id: chat, message_id: id, text: esc(phrases[i % phrases.length]) + tail, parse_mode: 'HTML' }).catch(() => {});
+      }
+    })();
+  }
+  return { stop: async (remove = true) => { done = true; if (id && remove) await tg(env, 'deleteMessage', { chat_id: chat, message_id: id }).catch(() => {}); } };
+}
+
 async function makeMixes(env, chat, session, more = false, lang = 'ru', note = '') {
   const cfg = await loadConfig(env);
   env = applyBrains(env, cfg);
@@ -828,15 +853,15 @@ async function makeMixes(env, chat, session, more = false, lang = 'ru', note = '
   const catalog = await loadCatalog(env);
   if (!catalog.length) return send(env, chat, t.noCatalog);
 
-  await send(env, chat, (more ? t.pickingMore : t.picking) + (note ? '\n<i>' + esc(note) + '</i>' : ''));
+  const progress = await startProgress(env, chat, more ? t.pickingMore : t.picking, t.progress, note);
   await action(env, chat, 'typing');
 
   const candidates = pickCandidates(catalog, session.prefs, session.used || [], more, cfg);
-  if (candidates.length < 4) return send(env, chat, t.tooFew, resultKeyboard(t));
+  if (candidates.length < 4) { await progress.stop(false); return send(env, chat, t.tooFew, resultKeyboard(t)); }
 
   let result = await composeMixes(env, session, candidates, lang, cfg);
   if (!result.length) result = await composeMixes(env, session, candidates, lang, cfg); // одна повторная попытка
-  if (!result.length) return send(env, chat, t.failed, resultKeyboard(t));
+  if (!result.length) { await progress.stop(false); return send(env, chat, t.failed, resultKeyboard(t)); }
 
   session.stage = 'done';
   session.used = [...(session.used || []), ...result.flatMap((m) => m.parts.map((p) => p.item.k))].slice(-80);
@@ -847,22 +872,30 @@ async function makeMixes(env, chat, session, more = false, lang = 'ru', note = '
   const shop = cfg.settings.shop_url;
   const text = result.map((m, i) => renderMix(m, i, t, result.length, bowl)).join('\n\n') +
     '\n\n<i>' + t.bowlNote(bowl) + '</i>\n' + t.footer + (shop ? ' ' + shop : '');
-  const picture = async () => {
-    if (!cfg.settings.images) return;
-    await action(env, chat, 'upload_photo');
+  if (cfg.settings.images && cfg.settings.image_first) {
+    // Вместе: «загрузка» крутится, пока рисуется картинка, потом сразу картинка и текст.
     const photo = await coverImage(env, result, cfg);
+    await progress.stop();
     if (photo) await sendPhoto(env, chat, photo, '');
-  };
-  if (cfg.settings.image_first) await picture();
-  await send(env, chat, text, resultKeyboard(t));
-  if (!cfg.settings.image_first) await picture();
+    await send(env, chat, text, resultKeyboard(t));
+  } else {
+    await progress.stop();
+    await send(env, chat, text, resultKeyboard(t));
+    if (cfg.settings.images) {
+      await action(env, chat, 'upload_photo');
+      const photo = await coverImage(env, result, cfg);
+      if (photo) await sendPhoto(env, chat, photo, '');
+    }
+  }
 }
 
 /** Общая картинка: две попытки основной моделью, потом запасная. */
 async function coverImage(env, mixes, cfg) {
   // Задание от ИИ берём, если оно полноценное и с логотипом; иначе — запасной шаблон.
   const own = String(mixes.image || '');
-  const prompt = own.length > 200 && /sigma/i.test(own) ? own + ' ' + IMAGE_SAFETY : imagePrompt(mixes);
+  const good = own.length > 200 && /sigma/i.test(own);
+  const labels = env.IMAGE_PROVIDER === 'openai';
+  const prompt = good ? own + ' ' + (labels ? IMAGE_LABELS : IMAGE_SAFETY) : imagePrompt(mixes);
   let lastErr = '';
   const attempt = (e2) => makeImage(e2, prompt).catch((e) => (console.log('image', e.message), lastErr = e.message, null));
   let photo = await attempt(env);
@@ -875,7 +908,8 @@ async function coverImage(env, mixes, cfg) {
     // Запасной вариант — бесплатно на Cloudflare: FLUX.2, если основная — OpenAI; иначе FLUX.1 (проще).
     const fallback = env.IMAGE_PROVIDER === 'openai' ? '@cf/black-forest-labs/flux-2-klein-4b'
       : (env.IMAGE_MODEL || '').includes('flux-1') ? null : '@cf/black-forest-labs/flux-1-schnell';
-    if (fallback) photo = await makeImage({ ...env, IMAGE_PROVIDER: 'cloudflare', IMAGE_MODEL: fallback }, prompt)
+    // Бесплатная модель с текстом не дружит — ей даём шаблон без выносок.
+    if (fallback) photo = await makeImage({ ...env, IMAGE_PROVIDER: 'cloudflare', IMAGE_MODEL: fallback }, labels ? imagePrompt(mixes) : prompt)
       .catch((e) => (console.log('image fallback', e.message), null));
   }
   return photo;
@@ -986,6 +1020,10 @@ export function composePrompt(cfg, lang = 'ru') {
     '- garnish в каждом миксе — НА АНГЛИЙСКОМ свежие ингредиенты этого микса, 3–5 штук через запятую.\n' +
     '- image — задание для модели рисования НА АНГЛИЙСКОМ, 80–180 слов: одна картинка на все три микса строго по разделу инструкции про картинку, ' +
     'с конкретными цветами соусов каждого микса (слева направо — микс 1, 2, 3) и ингредиентами. Без людей, кальянов, сигарет и дыма.\n' +
+    (cfg.settings.image_ai === 'chatgpt'
+      ? '  Выноски: от каждого соуса в круге — тонкая линия к короткой подписи вкуса, 1–2 слова на ' + t.llmLang + ' языке («печенье», «карамель», «лимон»). ' +
+        'Текст каждой подписи дай в задании дословно в кавычках и укажи, к какому соусу какого круга она относится. Бренды и проценты не пиши.\n'
+      : '  На картинке никаких подписей и выносок, даже если в инструкции сказано иначе: только логотип и цифры под кругами.\n') +
     'Верни ТОЛЬКО JSON: {"mixes":[{"title":"","parts":[{"n":1,"p":50,"look":""}],"text":"","strength":3,"garnish":""}],"image":""}';
 }
 
@@ -1222,6 +1260,7 @@ export function parseJson(text) {
  * Обычно задание для картинки пишет ИИ по разделу «КАРТИНКА» из инструкции.
  * Этот шаблон — запасной, если ИИ задание не вернул. К любому заданию добавляется IMAGE_SAFETY.
  */
+const IMAGE_LABELS = 'Text in the image: the "SIGMA MIX" logo, one small bold black digit centered under each swirl (1, 2, 3 from left to right), and the short flavor callouts given above — small neat dark-grey sans-serif labels on thin leader lines, spelled exactly as written, never overlapping the swirls or the logo. No brand names, no percentages, no other text. No people, no hands, no hookah, no cigarettes, no smoke.';
 const IMAGE_SAFETY = 'The only text in the image is the "SIGMA MIX" logo and one small bold black digit centered under each swirl (1, 2, 3 from left to right): no other words, labels, numbers or percentages. No people, no hands, no hookah, no cigarettes, no smoke.';
 const IMAGE_TEMPLATE = {
   background: 'Square premium advertising poster for flavor mixes, top-down view, light off-white studio background with subtle minimal light-grey geometric decorations: thin outline circles, small solid triangles, plus signs, dashed lines and diagonal hatching',
