@@ -654,11 +654,9 @@ export default {
 
   async scheduled(event, env, ctx) {
     if (event.cron === CRON_CONFIG) return ctx.waitUntil(cronConfig(env));
-    // Понедельник 03:00–07:50 UTC, каждые 10 минут — по одному бренду (лимит 50 внешних запросов на запуск).
-    const brands = (await loadConfig(env)).brands.filter((b) => b.on).map((b) => b.code);
-    const t = new Date(event.scheduledTime);
-    const i = (t.getUTCHours() - 3) * 6 + Math.floor(t.getUTCMinutes() / 10);
-    if (brands[i]) ctx.waitUntil(crawlBrand(env, brands[i]).catch((e) => console.log('crawl', brands[i], e.message)));
+    // Понедельник 03:00–07:50 UTC, каждые 10 минут — обновляем справочник: продолжаем начатый бренд
+    // или берём тот, что обновлялся давнее всех (лимит 50 внешних запросов на запуск, большой бренд — за несколько запусков).
+    ctx.waitUntil(crawlWeekly(env).catch((e) => console.log('crawl weekly', e.message)));
   },
 };
 
@@ -681,14 +679,46 @@ async function cronConfig(env) {
   await crawlMissingBrand(env);
 }
 
+/** Бренд, который сейчас докачивается по частям (если он всё ещё включён). */
+async function crawlingBrand(env, cfg) {
+  const slug = await env.KV.get('crawling').catch(() => null);
+  return slug ? cfg.brands.find((b) => b.on && b.code === slug) || null : null;
+}
+
+async function crawlWeekly(env) {
+  const cfg = await loadConfig(env);
+  let b = await crawlingBrand(env, cfg);
+  if (!b) {
+    const meta = (await env.KV.get('catmeta', 'json').catch(() => null)) || {};
+    const age = (x) => Date.parse((meta[x.code] || {}).updated || 0) || 0;
+    // Обновлялся больше 5 дней назад (или ни разу с тех пор, как появилась докачка) — самый давний первым.
+    b = cfg.brands.filter((x) => x.on && Date.now() - age(x) > 5 * 24 * 3600 * 1000).sort((x, y) => age(x) - age(y))[0];
+  }
+  if (!b) return;
+  const res = await crawlBrand(env, b.code);
+  if (!res.partial) console.log('crawl weekly', b.code, res.before, '→', res.total);
+}
+
 async function crawlMissingBrand(env) {
   const cfg = await loadConfig(env);
+  // Сначала докачиваем начатое — по кусочку за проверку, чтобы не съесть лимит запросов.
+  const cur = await crawlingBrand(env, cfg);
+  if (cur && !(await env.KV.get('crawlfail:' + cur.code))) {
+    try {
+      const res = await crawlBrand(env, cur.code, fetch, undefined, CRAWL_PAGES_CRON);
+      if (!res.partial && res.before === 0) await notifyAdmins(env, `✅ Бренд ${cur.name}: скачано ${res.active} вкусов, уже участвует в подборе.`);
+    } catch (e) {
+      await env.KV.put('crawlfail:' + cur.code, e.message, { expirationTtl: 3600 });
+      console.log('crawl continue', cur.code, e.message);
+    }
+    return;
+  }
   for (const b of cfg.brands.filter((x) => x.on)) {
     if (await env.KV.get('cat:' + b.code)) continue;
     if (await env.KV.get('crawlfail:' + b.code)) continue; // недавно не получилось — не долбим сайт
     try {
-      const res = await crawlBrand(env, b.code);
-      await notifyAdmins(env, `✅ Бренд ${b.name}: скачано ${res.active} вкусов, уже участвует в подборе.`);
+      const res = await crawlBrand(env, b.code, fetch, undefined, CRAWL_PAGES_CRON);
+      if (!res.partial) await notifyAdmins(env, `✅ Бренд ${b.name}: скачано ${res.active} вкусов, уже участвует в подборе.`);
     } catch (e) {
       await env.KV.put('crawlfail:' + b.code, e.message, { expirationTtl: 6 * 3600 });
       await notifyAdmins(env, `❌ Бренд ${b.name} (${b.code}): не получилось скачать вкусы — ${e.message}. Проверьте код на htreviews.org/tobaccos/${b.code}. Повторю через 6 часов.`);
@@ -808,7 +838,7 @@ async function onText(env, msg, ctx) {
       } catch (e) {
         return send(env, chat, '❌ Не получилось прочитать наличие: ' + esc(e.message));
       }
-      return send(env, chat, esc(stockReport(await env.KV.get('stock', 'json').catch(() => null))).slice(0, 4000));
+      return send(env, chat, esc(stockReport(await env.KV.get('stock', 'json').catch(() => null), await env.KV.get('catmeta', 'json').catch(() => null))).slice(0, 4000));
     }
     if (cmd === '/config') return send(env, chat, configSummary(await loadConfig(env), env, await env.KV.get('stock', 'json').catch(() => null)));
     await send(env, chat, '⏳ Читаю таблицу…');
@@ -875,7 +905,7 @@ async function onText(env, msg, ctx) {
 }
 
 /** /config — коротко, что сейчас действует. */
-const CODE_VERSION = '12.11 · 22 (сбои Google: повтор и тишина вместо тревог)';
+const CODE_VERSION = '12.12 · 23 (справочник качается целиком, по частям)';
 export function configSummary(cfg, env = {}, stock = null) {
   const at = cfg._at ? new Date(cfg._at).toLocaleString('ru-RU', { timeZone: 'Europe/Moscow', day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) + ' МСК' : 'ещё не загружалась — работают значения из кода';
   const s = cfg.settings;
@@ -1708,36 +1738,96 @@ async function fetchRetry(fetcher, url, opts, waits = [3000, 8000, 15000]) {
   }
 }
 
-export async function crawlBrand(env, slug, fetcher = fetch, waits) {
-  const headers = { 'user-agent': 'Mozilla/5.0 (compatible; VektorSigmaMixBot/1.0)', accept: 'text/html,application/json' };
-  const page = await fetchRetry(fetcher, `${SOURCE}/tobaccos/${slug}`, { headers }, waits);
-  if (!page.ok) throw new Error(`${slug}: страница бренда вернула ${page.status}`);
-  const html = await page.text();
-  const tag = (html.match(/<[^>]*object_wrapper[^>]*>/) || [''])[0];
-  const id = (tag.match(/data-id="(\d+)"/) || [])[1];
-  if (!id) throw new Error(`${slug}: не нашёл номер бренда на странице`);
+/*
+ * Скачивание бренда — по частям. Раньше бренд качался за один запуск и не больше 600 вкусов (30 страниц):
+ * у бесплатного Cloudflare лимит 50 внешних запросов на запуск. Большие бренды (Spectrum и т.п.) обрезались —
+ * а сортировка по рейтингу, поэтому терялись как раз редкие и новые вкусы, и они «не находились» на складе.
+ * Теперь за один запуск берём до maxPages страниц, недокачанное лежит в KV crawlpart:<бренд>,
+ * следующий запуск продолжает с того же места. В справочник (cat:<бренд>) бренд попадает только целиком.
+ */
+const CRAWL_PAGES = 25;        // страниц за запуск, когда бот ничем другим не занят (/refresh, понедельник)
+const CRAWL_PAGES_CRON = 12;   // в 15-минутной проверке таблицы: там часть лимита уже ушла на таблицу и ИИ
+const CRAWL_MAX = 4000;        // предохранитель: больше вкусов у одного бренда не бывает
+const CRAWL_OVERLAP = 5;       // продолжая, берём 5 вкусов внахлёст: за паузу рейтинг мог чуть сдвинуть порядок
 
-  const raw = [];
-  for (let offset = 0; offset < 600; ) { // до 30 страниц + повторы — в пределах лимита 50 запросов на запуск
-    const r = await fetchRetry(fetcher, `${SOURCE}/postData`, {
-      method: 'POST',
-      headers: { ...headers, 'content-type': 'application/json' },
-      body: JSON.stringify({ action: 'objectByBrand', data: { id, limit: PAGE, offset, sort: { s: 'rating', d: 'desc' } } }),
-    }, waits);
-    if (!r.ok) throw new Error(`${slug}: сайт не ответил (код ${r.status}) после 4 попыток, старые данные бренда сохранены`);
-    const chunk = await r.json();
-    if (!Array.isArray(chunk) || !chunk.length) break;
-    raw.push(...chunk);
-    offset += chunk.length;
-    if (chunk.length < PAGE) break;
-    await new Promise((res) => setTimeout(res, 1000)); // не долбим сайт: при частых запросах он перестаёт отвечать
+export async function crawlBrand(env, slug, fetcher = fetch, waits, maxPages = CRAWL_PAGES) {
+  const headers = { 'user-agent': 'Mozilla/5.0 (compatible; VektorSigmaMixBot/1.0)', accept: 'text/html,application/json' };
+  const partKey = 'crawlpart:' + slug;
+  let part = await env.KV.get(partKey, 'json').catch(() => null);
+  // Брошенное больше двух суток назад начинаем заново.
+  if (part && !(Date.now() - Date.parse(part.started) < 2 * 24 * 3600 * 1000)) part = null;
+  if (!part) {
+    const page = await fetchRetry(fetcher, `${SOURCE}/tobaccos/${slug}`, { headers }, waits);
+    if (!page.ok) throw new Error(`${slug}: страница бренда вернула ${page.status}`);
+    const html = await page.text();
+    const tag = (html.match(/<[^>]*object_wrapper[^>]*>/) || [''])[0];
+    const id = (tag.match(/data-id="(\d+)"/) || [])[1];
+    if (!id) throw new Error(`${slug}: не нашёл номер бренда на странице`);
+    part = { id, offset: 0, items: [], started: new Date().toISOString() };
+  }
+  const have = new Set(part.items.map((x) => x.k));
+  const savePart = () => Promise.all([
+    env.KV.put(partKey, JSON.stringify(part), { expirationTtl: 3 * 24 * 3600 }),
+    env.KV.put('crawling', slug, { expirationTtl: 3 * 24 * 3600 }),
+  ]).catch((e) => console.log('crawlpart', e.message));
+
+  let offset = part.offset ? Math.max(0, part.offset - CRAWL_OVERLAP) : 0;
+  let done = false;
+  try {
+    for (let pages = 0; pages < maxPages && offset < CRAWL_MAX; pages++) {
+      const r = await fetchRetry(fetcher, `${SOURCE}/postData`, {
+        method: 'POST',
+        headers: { ...headers, 'content-type': 'application/json' },
+        body: JSON.stringify({ action: 'objectByBrand', data: { id: part.id, limit: PAGE, offset, sort: { s: 'rating', d: 'desc' } } }),
+      }, waits);
+      if (!r.ok) throw new Error(`${slug}: сайт не ответил (код ${r.status}) после 4 попыток`);
+      const chunk = await r.json();
+      if (!Array.isArray(chunk) || !chunk.length) { done = true; break; }
+      for (const it of toItems(chunk)) if (!have.has(it.k)) { have.add(it.k); part.items.push(it); }
+      offset += chunk.length;
+      part.offset = offset;
+      if (chunk.length < PAGE) { done = true; break; }
+      await new Promise((res) => setTimeout(res, 1000)); // не долбим сайт: при частых запросах он перестаёт отвечать
+    }
+    if (offset >= CRAWL_MAX) done = true;
+  } catch (e) {
+    // Скачанное не теряем: следующий запуск продолжит отсюда. Справочник бренда пока прежний.
+    if (part.items.length) await savePart();
+    throw new Error(e.message + (part.items.length ? ` (скачано ${part.items.length}, продолжу со следующего запуска; старые данные бренда пока работают)` : ', старые данные бренда сохранены'));
+  }
+  if (!done) {
+    await savePart();
+    return { slug, partial: true, got: part.items.length };
   }
 
-  const items = toItems(raw);
+  const items = part.items;
+  const old = await env.KV.get('cat:' + slug, 'json').catch(() => null);
+  const before = old && old.items ? old.items.length : 0;
+  await env.KV.delete(partKey).catch(() => {});
+  if ((await env.KV.get('crawling').catch(() => null)) === slug) await env.KV.delete('crawling').catch(() => {});
   if (!items.length) throw new Error(`${slug}: пустой список, старые данные не трогаю`);
-  await env.KV.put('cat:' + slug, JSON.stringify({ updated: new Date().toISOString(), total: raw.length, items }));
+  // Сайт отдал заметно меньше, чем было, — похоже на сбой сайта, а не на то, что вкусы исчезли.
+  if (before >= 40 && items.length < before * 0.6) throw new Error(`${slug}: сайт отдал ${items.length} вкусов, а было ${before} — похоже на сбой сайта, старые данные не трогаю`);
+  await env.KV.put('cat:' + slug, JSON.stringify({ updated: new Date().toISOString(), total: items.length, items }));
+  await afterCatalogUpdate(env, slug, items);
   catCache = { at: 0, sig: '', items: [] };
-  return { slug, total: raw.length, active: items.filter((x) => !x.d).length };
+  return { slug, total: items.length, active: items.filter((x) => !x.d).length, before };
+}
+
+/**
+ * Справочник бренда обновился: запоминаем это в catmeta (по нему наличие понимает, что пора пересопоставить склад)
+ * и забываем ответы «не нашёл» по этому бренду — со свежим справочником ИИ посмотрит на них ещё раз.
+ */
+async function afterCatalogUpdate(env, slug, items) {
+  const meta = (await env.KV.get('catmeta', 'json').catch(() => null)) || {};
+  meta[slug] = { updated: new Date().toISOString(), total: items.length, active: items.filter((x) => !x.d).length };
+  await env.KV.put('catmeta', JSON.stringify(meta)).catch(() => {});
+  const brands = new Set(items.map((x) => x.b.toLowerCase()).filter(Boolean));
+  const map = await env.KV.get('stockmap', 'json').catch(() => null);
+  if (!map) return;
+  let n = 0;
+  for (const k of Object.keys(map)) if (!map[k] && brands.has(k.split('|')[0])) { delete map[k]; n++; }
+  if (n) await env.KV.put('stockmap', JSON.stringify(map)).catch(() => {});
 }
 
 /** Сырые записи сайта → компактные записи справочника. Снятые с производства выкидываем. */
@@ -1788,7 +1878,7 @@ async function onRefresh(url, env) {
   const brand = url.searchParams.get('brand');
   if (brand) {
     if (!brands.includes(brand)) return Response.json({ ok: false, error: 'бренд не включён во вкладке «Бренды»' });
-    try { return Response.json({ ok: true, ...(await crawlBrand(env, brand)) }); }
+    try { return Response.json({ ok: true, ...(await crawlBrand(env, brand, fetch, undefined, CRAWL_PAGES)) }); }
     catch (e) { return Response.json({ ok: false, error: e.message }); }
   }
   const html = `<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
@@ -1796,10 +1886,11 @@ async function onRefresh(url, env) {
 <h3>Обновление справочника</h3><div id="log"></div><script>
 const brands=${JSON.stringify(brands)},log=document.getElementById('log');
 (async()=>{for(const b of brands){const p=document.createElement('p');p.textContent=b+': загружаю…';log.append(p);
-try{const r=await fetch(location.pathname+location.search+'&brand='+encodeURIComponent(b)).then(r=>r.json());
-p.textContent=r.ok?'✅ '+b+': '+r.active+' вкусов в продаже (всего на сайте '+r.total+')':'❌ '+b+': '+r.error;}
+try{let r;for(let i=0;i<40;i++){r=await fetch(location.pathname+location.search+'&brand='+encodeURIComponent(b)).then(r=>r.json());
+if(!r.ok||!r.partial)break;p.textContent=b+': скачано '+r.got+', продолжаю…';}
+p.textContent=r.ok?(r.partial?'⏸ '+b+': скачано '+r.got+', докачаю сам в течение часа':'✅ '+b+': '+r.total+' вкусов на сайте, из них в продаже '+r.active+(r.before?' (было '+r.before+')':'')):'❌ '+b+': '+r.error;}
 catch(e){p.textContent='❌ '+b+': '+e.message;}}
-const d=document.createElement('p');d.textContent='Готово.';log.append(d);})();
+const d=document.createElement('p');d.textContent='Готово. Наличие пересопоставится само в течение 15 минут, или сразу — командой /stock в боте.';log.append(d);})();
 </script>`;
   return new Response(html, { headers: { 'content-type': 'text/html; charset=utf-8' } });
 }
@@ -1999,6 +2090,7 @@ export function matchStock(positions, catalog, map = {}, manual = {}) {
   const index = new Map();
   const add = (b, name, it) => { const q = squash(name); if (q.length < 2) return; const k = b + '|' + q; (index.get(k) || index.set(k, []).get(k)).push(it); };
   for (const it of catalog) { add(it.b, it.n, it); if (it.a) add(it.b, it.a, it); }
+  const known = new Set(catalog.map((x) => x.k));
   const items = {}, unmatched = [];
   let tobaccos = 0;
   const done = new Map(); // одна и та же позиция в разных фасовках ищется один раз
@@ -2010,6 +2102,7 @@ export function matchStock(positions, catalog, map = {}, manual = {}) {
     if (!done.has(e.id)) {
       let key = manual[e.id], who = 'вручную';
       if (key === undefined) { key = map[e.id]; who = 'ИИ'; }
+      if (key && !known.has(key)) key = undefined; // ответ указывает на табак, которого в справочнике больше нет
       if (key === undefined) {
         who = 'по названию';
         const hits = [...new Set(e.names.flatMap((v) => index.get(e.brand + '|' + squash(v)) || []))]
@@ -2059,9 +2152,11 @@ const quickHash = (s) => { let h = 5381; for (let i = 0; i < s.length; i++) h = 
 export async function syncStock(env, rows, cfg, force = false, matchRows = null) {
   const prev = await env.KV.get('stock', 'json').catch(() => null);
   const map = (await env.KV.get('stockmap', 'json').catch(() => null)) || {};
-  // Дешёвая проверка до разбора: та же выгрузка, те же ответы ИИ, тот же день — ничего не делаем.
+  const catmeta = await env.KV.get('catmeta').catch(() => null);
+  // Дешёвая проверка до разбора: та же выгрузка, те же ответы ИИ, тот же справочник, тот же день — ничего не делаем.
   const fixes = (matchRows || []).slice(1).filter((r) => r[4]).map((r) => [r[0], r[4]]);
-  const hash = quickHash(JSON.stringify(rows || [])) + ':' + Object.keys(map).length + ':' + quickHash(JSON.stringify(fixes)) + ':' + new Date().toISOString().slice(0, 10);
+  const hash = quickHash(JSON.stringify(rows || [])) + ':' + Object.keys(map).length + ':' + quickHash(JSON.stringify(fixes)) + ':' +
+    quickHash(String(catmeta || '')) + ':' + new Date().toISOString().slice(0, 10);
   // …кроме случая, когда в прошлый раз не удалось записать вкладку «Соответствия»: тогда пробуем ещё раз.
   if (!force && prev && prev.hash === hash && !prev.tabError) return { state: 'ok', changed: false, ...stockStats(prev) };
   const positions = parseStock(rows);
@@ -2129,8 +2224,13 @@ export async function resolveStock(env, cfg, rows = null) {
   const e = applyBrains(env, cfg);
   const brands = [...new Set(todo.map((u) => u.brand))];
   await Promise.all(brands.map(async (brand) => {
-    const cat = catalog.filter((x) => x.b === brand);
     const mine = todo.filter((u) => u.brand === brand).slice(0, 120);
+    // Большой бренд — это сотни строк справочника. Линейки заведомо другой крепости (Hard ↔ Medium) ИИ не показываем.
+    const all = catalog.filter((x) => x.b === brand);
+    const lines = [...new Set(mine.map((u) => u.line))], ok = new Map();
+    const fits = (l) => (ok.has(l) ? ok.get(l) : ok.set(l, lines.some((sl) => lineScore(sl, l) > -3)).get(l));
+    const near = all.filter((x) => fits(x.l));
+    const cat = near.length ? near : all;
     if (!cat.length) { for (const u of mine) map[u.id] = ''; return; }
     const sys = 'Ты сопоставляешь позиции склада кальянного магазина со справочником табаков бренда ' + brand + '. ' +
       'Для каждой позиции склада найди ТОТ ЖЕ табак в справочнике. Название на складе и в справочнике часто на разных языках: ' +
@@ -2151,7 +2251,7 @@ export async function resolveStock(env, cfg, rows = null) {
 }
 
 /** Ответ на /stock: сводка и список нераспознанного. */
-export function stockReport(stock) {
+export function stockReport(stock, catmeta = null) {
   if (!stock) return stockLine(null);
   const st = { state: 'ok', ...stockStats(stock) };
   let s = stockLine(st) + '\nОбновлено: ' + new Date(stock.at).toLocaleString('ru-RU', { timeZone: 'Europe/Moscow', day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) + ' МСК';
@@ -2159,6 +2259,9 @@ export function stockReport(stock) {
   for (const k of Object.keys(stock.items)) { const b = k.split('/')[0]; by[b] = (by[b] || 0) + 1; }
   if (stock.tabError) s += '\n\n⚠️ Вкладка «Соответствия» не записана: ' + stock.tabError;
   s += '\n\nПо брендам: ' + Object.entries(by).map(([b, n]) => `${b} — ${n}`).join(', ');
+  if (catmeta && Object.keys(catmeta).length) {
+    s += '\nСправочник htreviews: ' + Object.entries(catmeta).map(([b, m]) => `${b} — ${m.total} (${new Date(m.updated).toLocaleDateString('ru-RU', { timeZone: 'Europe/Moscow', day: '2-digit', month: '2-digit' })})`).join(', ');
+  }
   if (stock.unmatched.length) {
     s += '\n\n❓ Не распознано (в подборе не участвуют). Спросить ИИ ещё раз: /stock заново. Посмотреть, что есть в справочнике: /find spectrum honey\n' + stock.unmatched.slice(0, 60).map((u) => `• ${u.brand} ${u.line} — ${u.flavor}`).join('\n') +
       (stock.unmatched.length > 60 ? `\n…и ещё ${stock.unmatched.length - 60}` : '');
