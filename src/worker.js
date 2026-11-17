@@ -716,6 +716,24 @@ async function crawlWeekly(env) {
   }
 }
 
+/** Строка сводки по бренду после полной загрузки. */
+function crawlLine(res) {
+  return `✅ ${res.slug}: ${res.total} вкусов в ${res.lines || '?'} линейках, снято с производства ${res.total - res.active}` +
+    (res.before ? ` (было ${res.before})` : '') + (res.skipped && res.skipped.length ? `, ⚠️ не открылись: ${res.skipped.join(', ')}` : '');
+}
+
+/** Ход команды /refresh: бренд докачан (res) или не получился (err). Когда список кончился — сводка админам. */
+async function recrawlStep(env, code, res, err) {
+  const rc = await env.KV.get('recrawl', 'json').catch(() => null);
+  if (!rc || !rc.codes || rc.codes[0] !== code) return;
+  if (res) { rc.results.push(crawlLine(res)); rc.codes.shift(); rc.tries = 0; }
+  else if (++rc.tries >= 3) { rc.results.push(`❌ ${code}: ${err} — оставил прежние данные, попробую в понедельник`); rc.codes.shift(); rc.tries = 0; }
+  if (rc.codes.length) return env.KV.put('recrawl', JSON.stringify(rc));
+  await env.KV.delete('recrawl').catch(() => {});
+  await notifyAdmins(env, ('📚 Справочник htreviews перекачан:\n' + rc.results.join('\n') +
+    '\n\nСклад пересопоставится сам в течение 15–30 минут, или сразу — /stock.').slice(0, 3800));
+}
+
 async function crawlMissingBrand(env) {
   const cfg = await loadConfig(env);
   // Сначала докачиваем начатое — по кусочку за проверку, чтобы не съесть лимит запросов.
@@ -723,11 +741,32 @@ async function crawlMissingBrand(env) {
   if (cur && !(await env.KV.get('crawlfail:' + cur.code))) {
     try {
       const res = await crawlBrand(env, cur.code, fetch, undefined, CRAWL_PAGES_CRON);
-      if (!res.partial && res.before === 0) await notifyAdmins(env, `✅ Бренд ${cur.name}: скачано ${res.active} вкусов, уже участвует в подборе.`);
-      else if (!res.partial) { const text = newsText(cur.name, res); if (text) await notifyAdmins(env, text.slice(0, 3800)); }
+      if (!res.partial) {
+        const rc = await env.KV.get('recrawl', 'json').catch(() => null);
+        if (rc && rc.codes && rc.codes[0] === cur.code) await recrawlStep(env, cur.code, res);
+        else if (res.before === 0) await notifyAdmins(env, `✅ Бренд ${cur.name}: скачано ${res.active} вкусов, уже участвует в подборе.`);
+        else { const text = newsText(cur.name, res); if (text) await notifyAdmins(env, text.slice(0, 3800)); }
+      }
     } catch (e) {
-      await env.KV.put('crawlfail:' + cur.code, e.message, { expirationTtl: 3600 });
+      await env.KV.put('crawlfail:' + cur.code, e.message, { expirationTtl: 1800 });
+      await recrawlStep(env, cur.code, null, e.message);
       console.log('crawl continue', cur.code, e.message);
+    }
+    return;
+  }
+  // Команда /refresh: следующий бренд из списка.
+  const rc = await env.KV.get('recrawl', 'json').catch(() => null);
+  if (rc && rc.codes && rc.codes.length) {
+    const code = rc.codes[0];
+    if (!cfg.brands.some((b) => b.on && b.code === code)) { rc.codes.shift(); await env.KV.put('recrawl', JSON.stringify(rc)); return; }
+    if (await env.KV.get('crawlfail:' + code)) return; // недавно не получилось — подождём
+    try {
+      const res = await crawlBrand(env, code, fetch, undefined, CRAWL_PAGES_CRON);
+      if (!res.partial) await recrawlStep(env, code, res);
+    } catch (e) {
+      await env.KV.put('crawlfail:' + code, e.message, { expirationTtl: 1800 });
+      await recrawlStep(env, code, null, e.message);
+      console.log('recrawl', code, e.message);
     }
     return;
   }
@@ -823,8 +862,20 @@ async function onText(env, msg, ctx) {
   }
   // Служебные команды: /id — всем (чтобы узнать свой ID для настройки admins), остальные — только админам.
   if (cmd === '/id') return send(env, chat, `Твой Telegram ID: <code>${msg.from && msg.from.id}</code>`);
-  if (cmd === '/reload' || cmd === '/config' || cmd === '/stock' || cmd === '/find') {
+  if (cmd === '/reload' || cmd === '/config' || cmd === '/stock' || cmd === '/find' || cmd === '/refresh') {
     if (!(await adminIds(env)).includes(String(msg.from && msg.from.id))) return send(env, chat, 'Эта команда только для админов бота.');
+    if (cmd === '/refresh') {
+      // Перекачать справочник всех включённых брендов в фоне — то же, что страница /refresh, но без браузера.
+      const cfg = await loadConfig(env);
+      const codes = cfg.brands.filter((b) => b.on).map((b) => b.code);
+      if (!codes.length) return send(env, chat, 'Во вкладке «Бренды» нет включённых брендов.');
+      const cur = await env.KV.get('recrawl', 'json').catch(() => null);
+      if (cur && cur.codes && cur.codes.length && !/заново/i.test(text)) {
+        return send(env, chat, `⏳ Уже перекачиваю: осталось ${cur.codes.length} из ${cur.total} (${cur.codes.join(', ')}). Начать сначала: /refresh заново`);
+      }
+      await env.KV.put('recrawl', JSON.stringify({ codes, total: codes.length, results: [], tries: 0, started: new Date().toISOString() }));
+      return send(env, chat, `🔄 Перекачиваю справочник htreviews: ${codes.join(', ')}.\nРаботаю в фоне при проверках раз в 15 минут, понемногу (лимит запросов Cloudflare) — обычно 1–3 часа. В конце пришлю сводку. Пока идёт — подбор работает на прежнем справочнике.`);
+    }
     if (cmd === '/find') {
       // Поиск по справочнику htreviews: /find spectrum honey
       const q = words(text.replace(/^\/find\S*/i, ''));
@@ -923,7 +974,7 @@ async function onText(env, msg, ctx) {
 }
 
 /** /config — коротко, что сейчас действует. */
-const CODE_VERSION = '12.14 · 25 (полный справочник: все линейки и атрибуты, сводка новинок)';
+const CODE_VERSION = '12.14 · 25 (полный справочник: все линейки и атрибуты, сводка новинок, /refresh в боте)';
 export function configSummary(cfg, env = {}, stock = null) {
   const at = cfg._at ? new Date(cfg._at).toLocaleString('ru-RU', { timeZone: 'Europe/Moscow', day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) + ' МСК' : 'ещё не загружалась — работают значения из кода';
   const s = cfg.settings;
@@ -1861,8 +1912,8 @@ export async function crawlBrand(env, slug, fetcher = fetch, waits, maxPages = C
     if (!done && part.phase === 'lines' && part.li >= part.lines.length) done = true;
   } catch (e) {
     // Скачанное не теряем: следующий запуск продолжит отсюда. Справочник бренда пока прежний.
-    await savePart();
-    throw new Error(e.message + (part.items.length ? ` (скачано ${part.items.length}, продолжу со следующего запуска; старые данные бренда пока работают)` : ', старые данные бренда сохранены'));
+    if (part) await savePart();
+    throw new Error(e.message + (part && part.items.length ? ` (скачано ${part.items.length}, продолжу со следующего запуска; старые данные бренда пока работают)` : ', старые данные бренда сохранены'));
   }
   if (!done) {
     await savePart();
