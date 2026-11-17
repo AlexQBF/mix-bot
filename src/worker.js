@@ -635,6 +635,7 @@ export function resetCaches() { cfgCache = { at: 0, cfg: null }; catCache = { at
 const CANDIDATES = 60;
 const HELPERS = 15;
 const HELPER_GROUPS = ['Освежающий', 'Цитрусовый', 'Ягодный'];
+const HELPER_TASTES = ['кислый', 'освежающий'];
 
 /* ═════════════════════════ Входные точки ═════════════════════════ */
 
@@ -679,6 +680,18 @@ async function cronConfig(env) {
   await crawlMissingBrand(env);
 }
 
+/** Сводка для админов: что нового на htreviews по бренду. null — сообщать нечего. */
+export function newsText(name, res) {
+  const n = res && res.news;
+  if (!n || !(n.added.length || n.stopped.length || n.lines.length)) return null;
+  const list = (a) => a.slice(0, 15).join('; ') + (a.length > 15 ? ` …и ещё ${a.length - 15}` : '');
+  return `🆕 ${name}: обновил справочник с htreviews, всего вкусов: ${res.total}.` +
+    (n.lines.length ? `\nНовые линейки: ${n.lines.map((l) => l.split('/').pop()).join(', ')}` : '') +
+    (n.added.length ? `\nНовые вкусы (${n.added.length}): ${list(n.added)}` : '') +
+    (n.stopped.length ? `\nСняты с производства (${n.stopped.length}): ${list(n.stopped)}` : '') +
+    (n.added.length ? '\nЕсли что-то из новинок уже есть на складе — оно само попадёт в подбор после следующей выгрузки «Наличия».' : '');
+}
+
 /** Бренд, который сейчас докачивается по частям (если он всё ещё включён). */
 async function crawlingBrand(env, cfg) {
   const slug = await env.KV.get('crawling').catch(() => null);
@@ -696,7 +709,11 @@ async function crawlWeekly(env) {
   }
   if (!b) return;
   const res = await crawlBrand(env, b.code);
-  if (!res.partial) console.log('crawl weekly', b.code, res.before, '→', res.total);
+  if (!res.partial) {
+    console.log('crawl weekly', b.code, res.before, '→', res.total);
+    const text = newsText(b.name, res);
+    if (text) await notifyAdmins(env, text.slice(0, 3800));
+  }
 }
 
 async function crawlMissingBrand(env) {
@@ -707,6 +724,7 @@ async function crawlMissingBrand(env) {
     try {
       const res = await crawlBrand(env, cur.code, fetch, undefined, CRAWL_PAGES_CRON);
       if (!res.partial && res.before === 0) await notifyAdmins(env, `✅ Бренд ${cur.name}: скачано ${res.active} вкусов, уже участвует в подборе.`);
+      else if (!res.partial) { const text = newsText(cur.name, res); if (text) await notifyAdmins(env, text.slice(0, 3800)); }
     } catch (e) {
       await env.KV.put('crawlfail:' + cur.code, e.message, { expirationTtl: 3600 });
       console.log('crawl continue', cur.code, e.message);
@@ -905,7 +923,7 @@ async function onText(env, msg, ctx) {
 }
 
 /** /config — коротко, что сейчас действует. */
-const CODE_VERSION = '12.12 · 23 (справочник качается целиком, по частям)';
+const CODE_VERSION = '12.14 · 25 (полный справочник: все линейки и атрибуты, сводка новинок)';
 export function configSummary(cfg, env = {}, stock = null) {
   const at = cfg._at ? new Date(cfg._at).toLocaleString('ru-RU', { timeZone: 'Europe/Moscow', day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) + ' МСК' : 'ещё не загружалась — работают значения из кода';
   const s = cfg.settings;
@@ -1276,7 +1294,7 @@ export function pickCandidates(catalog, prefs, used = [], more = false, cfg = DE
   const chosen = new Set(main.map((x) => x.it.k));
   // «Помощники» для баланса: свежесть, цитрус, кислые ягоды с хорошим рейтингом.
   const helpers = scored
-    .filter((x) => !chosen.has(x.it.k) && x.it.c >= 5 && x.it.g.some((g) => HELPER_GROUPS.includes(g)))
+    .filter((x) => !chosen.has(x.it.k) && x.it.c >= 5 && (x.it.g.some((g) => HELPER_GROUPS.includes(g)) || (x.it.q || []).some((q) => HELPER_TASTES.includes(q))))
     .sort((a, b) => b.it.r - a.it.r + (b.score - a.score) * 0.1)
     .slice(0, HELPERS);
   return [...main, ...helpers].map((x) => x.it);
@@ -1294,7 +1312,7 @@ export function composePrompt(cfg, lang = 'ru') {
     (cfg.limits.length ? 'ОБЯЗАТЕЛЬНЫЕ ОГРАНИЧЕНИЯ ОТ КОМАНДЫ — они важнее всего остального:\n' + cfg.limits.map((x) => '- ' + x).join('\n') + '\n\n' : '') +
     // ↓ технические рамки и формат ответа: от них зависит, сможет ли бот разобрать ответ.
     'ТЕХНИЧЕСКИЕ ТРЕБОВАНИЯ:\n' +
-    '- Собери ровно 3 микса ТОЛЬКО из табаков списка. Формат строки списка: номер|табак|крепость по htreviews|рейтинг|вкусы [группы].\n' +
+    '- Собери ровно 3 микса ТОЛЬКО из табаков списка. Формат строки списка: номер|табак|крепость по htreviews|рейтинг|вкусы [группы] {характер вкуса: сладкий, кислый, терпкий, освежающий…}. Характер вкуса помогает балансу: сладкое уравновешивай кислым или освежающим.\n' +
     '- Никогда не возвращай пустой список миксов и не проси что-то добавить. Если табака или вкуса, который назвал клиент, в списке нет — подбери самое близкое по вкусу из списка.\n' +
     `- В миксе от ${st.min_tobaccos} до ${st.max_tobaccos} табаков, доли — целые числа, кратные ${st.share_step}, в сумме ровно 100.\n` +
     (st.base_share ? `- В каждом миксе один табак — база: его доля не меньше ${st.base_share}%. Остальные табаки — дополнения к базе: подбирай их под её вкус, чтобы они подчёркивали или оттеняли базу, а не спорили с ней.\n` : '') +
@@ -1320,7 +1338,8 @@ async function composeMixes(env, session, candidates, lang = 'ru', cfg = DEFAULT
   const asked = askedKeys(candidates, session.prefs, session.text);
   const lines = candidates.map((it, i) =>
     `${asked.has(it.k) ? '★' : ''}${i + 1}|${it.b}${it.l && it.l !== 'Основная' ? ' ' + it.l : ''} — ${it.n}${it.a ? ' (' + it.a + ')' : ''}|` +
-    `${STRENGTH_NAME[effStrength(it, cfg.settings.strong_words)] || '?'}|${it.c >= 3 ? it.r : '-'}|${it.t.join(', ')}${it.g.length ? ' [' + it.g.join(', ') + ']' : ''}`);
+    `${STRENGTH_NAME[effStrength(it, cfg.settings.strong_words)] || '?'}|${it.c >= 3 ? it.r : '-'}|${it.t.join(', ')}${it.g.length ? ' [' + it.g.join(', ') + ']' : ''}` +
+    `${(it.q || []).length ? ' {' + it.q.join(', ') + '}' : ''}`);
   const want = { light: 'лёгкая', medium: 'средняя', strong: 'крепкая' }[session.prefs.strength] || 'любая';
   const user =
     'Запрос клиента: ' + session.text + '\n' +
@@ -1738,61 +1757,111 @@ async function fetchRetry(fetcher, url, opts, waits = [3000, 8000, 15000]) {
   }
 }
 
+/** Номер объекта (бренда или линейки) на его странице htreviews: <div class="object_wrapper" data-id="31">. */
+function objectId(html) {
+  const tag = (html.match(/<[^>]*object_wrapper[^>]*>/) || [''])[0];
+  return (tag.match(/data-id="(\d+)"/) || [])[1] || null;
+}
+/** Ссылки на линейки бренда со страницы бренда: href="spectrum/hard-line" или ".../tobaccos/spectrum/hard-line". */
+export function lineLinks(html, slug) {
+  const re = new RegExp(`href="(?:https?://htreviews\\.org)?/?(?:tobaccos/)?${escRe(slug)}/([a-z0-9-]+)/?"`, 'gi');
+  const out = new Set();
+  for (const m of String(html).matchAll(re)) out.add(slug + '/' + m[1].toLowerCase());
+  return [...out];
+}
+
 /*
- * Скачивание бренда — по частям. Раньше бренд качался за один запуск и не больше 600 вкусов (30 страниц):
- * у бесплатного Cloudflare лимит 50 внешних запросов на запуск. Большие бренды (Spectrum и т.п.) обрезались —
- * а сортировка по рейтингу, поэтому терялись как раз редкие и новые вкусы, и они «не находились» на складе.
- * Теперь за один запуск берём до maxPages страниц, недокачанное лежит в KV crawlpart:<бренд>,
- * следующий запуск продолжает с того же места. В справочник (cat:<бренд>) бренд попадает только целиком.
+ * Скачивание бренда — в два прохода и по частям.
+ * 1) objectByBrand — все вкусы бренда. Сайт отдаёт так только то, что сейчас выпускается.
+ * 2) objectByLine — каждая линейка отдельно (линейки берём со страницы бренда и из ответов шага 1).
+ *    Так приходят и снятые с производства вкусы и линейки (Spectrum Hard / Mix / Kitchen и т.п.),
+ *    которые всё ещё лежат на складе. В подбор снятые идут, только если они есть в наличии.
+ * У бесплатного Cloudflare лимит 50 внешних запросов на запуск, поэтому за один запуск — не больше maxPages запросов,
+ * недокачанное лежит в KV crawlpart:<бренд>, следующий запуск продолжает. В справочник бренд попадает только целиком.
  */
-const CRAWL_PAGES = 25;        // страниц за запуск, когда бот ничем другим не занят (/refresh, понедельник)
+const CRAWL_PAGES = 25;        // запросов к сайту за запуск, когда бот ничем другим не занят (/refresh, понедельник)
 const CRAWL_PAGES_CRON = 12;   // в 15-минутной проверке таблицы: там часть лимита уже ушла на таблицу и ИИ
-const CRAWL_MAX = 4000;        // предохранитель: больше вкусов у одного бренда не бывает
+const CRAWL_MAX = 3000;        // предохранитель: столько вкусов в одной выдаче не бывает
 const CRAWL_OVERLAP = 5;       // продолжая, берём 5 вкусов внахлёст: за паузу рейтинг мог чуть сдвинуть порядок
 
 export async function crawlBrand(env, slug, fetcher = fetch, waits, maxPages = CRAWL_PAGES) {
   const headers = { 'user-agent': 'Mozilla/5.0 (compatible; VektorSigmaMixBot/1.0)', accept: 'text/html,application/json' };
   const partKey = 'crawlpart:' + slug;
   let part = await env.KV.get(partKey, 'json').catch(() => null);
-  // Брошенное больше двух суток назад начинаем заново.
-  if (part && !(Date.now() - Date.parse(part.started) < 2 * 24 * 3600 * 1000)) part = null;
+  // Брошенное больше двух суток назад или от прошлой версии бота (без проходов) начинаем заново.
+  if (part && (!part.phase || !(Date.now() - Date.parse(part.started) < 2 * 24 * 3600 * 1000))) part = null;
+  let budget = maxPages;
+  const get = async (url) => { budget--; return fetchRetry(fetcher, url, { headers }, waits); };
+  const post = async (action, id, offset) => {
+    budget--;
+    const r = await fetchRetry(fetcher, `${SOURCE}/postData`, {
+      method: 'POST',
+      headers: { ...headers, 'content-type': 'application/json' },
+      body: JSON.stringify({ action, data: { id, limit: PAGE, offset, sort: { s: 'rating', d: 'desc' } } }),
+    }, waits);
+    if (!r.ok) throw new Error(`${slug}: сайт не ответил (код ${r.status}) после 4 попыток`);
+    const chunk = await r.json();
+    return Array.isArray(chunk) ? chunk : [];
+  };
+
   if (!part) {
-    const page = await fetchRetry(fetcher, `${SOURCE}/tobaccos/${slug}`, { headers }, waits);
+    const page = await get(`${SOURCE}/tobaccos/${slug}`);
     if (!page.ok) throw new Error(`${slug}: страница бренда вернула ${page.status}`);
     const html = await page.text();
-    const tag = (html.match(/<[^>]*object_wrapper[^>]*>/) || [''])[0];
-    const id = (tag.match(/data-id="(\d+)"/) || [])[1];
+    const id = objectId(html);
     if (!id) throw new Error(`${slug}: не нашёл номер бренда на странице`);
-    part = { id, offset: 0, items: [], started: new Date().toISOString() };
+    part = { id, phase: 'brand', offset: 0, lines: lineLinks(html, slug), li: 0, lineId: null, skipped: [], items: [], full: {}, started: new Date().toISOString() };
   }
+  part.full = part.full || {};
   const have = new Set(part.items.map((x) => x.k));
+  const take = (chunk) => {
+    for (const x of chunk) {
+      const ls = String((x && x.line_slug) || '').toLowerCase();
+      if (ls && ls.startsWith(slug + '/') && !part.lines.includes(ls)) part.lines.push(ls);
+    }
+    for (const it of toItems(chunk)) if (!have.has(it.k)) { have.add(it.k); part.items.push(it); }
+    for (const x of chunk) if (x && x.slug && x.name && !part.full[x.slug]) part.full[x.slug] = toFull(x);
+  };
   const savePart = () => Promise.all([
     env.KV.put(partKey, JSON.stringify(part), { expirationTtl: 3 * 24 * 3600 }),
     env.KV.put('crawling', slug, { expirationTtl: 3 * 24 * 3600 }),
   ]).catch((e) => console.log('crawlpart', e.message));
 
-  let offset = part.offset ? Math.max(0, part.offset - CRAWL_OVERLAP) : 0;
   let done = false;
   try {
-    for (let pages = 0; pages < maxPages && offset < CRAWL_MAX; pages++) {
-      const r = await fetchRetry(fetcher, `${SOURCE}/postData`, {
-        method: 'POST',
-        headers: { ...headers, 'content-type': 'application/json' },
-        body: JSON.stringify({ action: 'objectByBrand', data: { id: part.id, limit: PAGE, offset, sort: { s: 'rating', d: 'desc' } } }),
-      }, waits);
-      if (!r.ok) throw new Error(`${slug}: сайт не ответил (код ${r.status}) после 4 попыток`);
-      const chunk = await r.json();
-      if (!Array.isArray(chunk) || !chunk.length) { done = true; break; }
-      for (const it of toItems(chunk)) if (!have.has(it.k)) { have.add(it.k); part.items.push(it); }
-      offset += chunk.length;
-      part.offset = offset;
-      if (chunk.length < PAGE) { done = true; break; }
-      await new Promise((res) => setTimeout(res, 1000)); // не долбим сайт: при частых запросах он перестаёт отвечать
+    let offset = part.offset ? Math.max(0, part.offset - CRAWL_OVERLAP) : 0;
+    while (budget > 0) {
+      if (part.phase === 'brand') {
+        // Проход 1: все выпускаемые вкусы бренда.
+        const chunk = await post('objectByBrand', part.id, offset);
+        take(chunk);
+        offset += chunk.length;
+        part.offset = offset;
+        if (chunk.length < PAGE || offset >= CRAWL_MAX) { part.phase = 'lines'; part.li = 0; part.lineId = null; part.offset = offset = 0; }
+      } else {
+        // Проход 2: каждая линейка — с ней приходят и снятые с производства вкусы.
+        if (part.li >= part.lines.length) { done = true; break; }
+        const line = part.lines[part.li];
+        if (!part.lineId) {
+          const page = await get(`${SOURCE}/tobaccos/${line}`);
+          const id = page.ok ? objectId(await page.text()) : null;
+          if (!id) { part.skipped.push(line); part.li++; continue; } // эту линейку пропускаем, остальное качаем
+          part.lineId = id;
+          part.offset = offset = 0;
+          continue;
+        }
+        const chunk = await post('objectByLine', part.lineId, offset);
+        take(chunk);
+        offset += chunk.length;
+        part.offset = offset;
+        if (chunk.length < PAGE || offset >= CRAWL_MAX) { part.li++; part.lineId = null; part.offset = offset = 0; }
+      }
+      if (budget > 0) await new Promise((res) => setTimeout(res, 1000)); // не долбим сайт: при частых запросах он перестаёт отвечать
     }
-    if (offset >= CRAWL_MAX) done = true;
+    if (!done && part.phase === 'lines' && part.li >= part.lines.length) done = true;
   } catch (e) {
     // Скачанное не теряем: следующий запуск продолжит отсюда. Справочник бренда пока прежний.
-    if (part.items.length) await savePart();
+    await savePart();
     throw new Error(e.message + (part.items.length ? ` (скачано ${part.items.length}, продолжу со следующего запуска; старые данные бренда пока работают)` : ', старые данные бренда сохранены'));
   }
   if (!done) {
@@ -1808,10 +1877,24 @@ export async function crawlBrand(env, slug, fetcher = fetch, waits, maxPages = C
   if (!items.length) throw new Error(`${slug}: пустой список, старые данные не трогаю`);
   // Сайт отдал заметно меньше, чем было, — похоже на сбой сайта, а не на то, что вкусы исчезли.
   if (before >= 40 && items.length < before * 0.6) throw new Error(`${slug}: сайт отдал ${items.length} вкусов, а было ${before} — похоже на сбой сайта, старые данные не трогаю`);
-  await env.KV.put('cat:' + slug, JSON.stringify({ updated: new Date().toISOString(), total: items.length, items }));
+  const now = new Date().toISOString();
+  await env.KV.put('cat:' + slug, JSON.stringify({ updated: now, total: items.length, items, lines: part.lines, skipped: part.skipped }));
+  await env.KV.put('catx:' + slug, JSON.stringify({ updated: now, total: Object.keys(part.full).length, items: Object.values(part.full) })).catch((e) => console.log('catx', e.message));
   await afterCatalogUpdate(env, slug, items);
   catCache = { at: 0, sig: '', items: [] };
-  return { slug, total: items.length, active: items.filter((x) => !x.d).length, before };
+  // Что изменилось на сайте с прошлого раза. Сравниваем, только если прошлый раз уже качались все линейки
+  // (иначе первая полная загрузка покажет «новыми» все снятые с производства вкусы).
+  let news = null;
+  if (old && old.lines && old.items) {
+    const was = new Map(old.items.map((x) => [x.k, x]));
+    const label = (x) => `${x.l ? x.l + ' — ' : ''}${x.n}${x.a ? ' (' + x.a + ')' : ''}`;
+    news = {
+      added: items.filter((x) => !was.has(x.k)).map(label),
+      stopped: items.filter((x) => x.d && was.has(x.k) && !was.get(x.k).d).map(label),
+      lines: part.lines.filter((l) => !old.lines.includes(l)),
+    };
+  }
+  return { slug, total: items.length, active: items.filter((x) => !x.d).length, before, lines: part.lines.length, skipped: part.skipped, news };
 }
 
 /**
@@ -1851,10 +1934,32 @@ export function toItems(raw) {
       c: parseInt(x.ratings_count, 10) || 0,
       t: [...new Set(tags.map((t) => t.name).filter(Boolean))],
       g: [...new Set(tags.map((t) => t.group).filter(Boolean))],
+      q: [...new Set(tags.map((t) => String(t.taste || '').toLowerCase()).filter(Boolean))], // вкус тега: сладкий, кислый, терпкий…
+      v: parseInt(x.strength_count, 10) || 0,        // сколько человек голосовали за крепость
       ...(gone ? { d: 1 } : {}),
     });
   }
   return items;
+}
+
+/**
+ * Полная запись вкуса со всем, что отдаёт сайт в списке, — для хранения (KV catx:<бренд>).
+ * В подбор не загружается, чтобы не тратить процессорное время на каждый запрос клиента.
+ */
+const plain = (h) => String(h || '').replace(/<br\s*\/?>|<\/p>/gi, '\n').replace(/<[^>]*>/g, '').replace(/&nbsp;/g, ' ')
+  .replace(/&quot;/g, '"').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/\n{3,}/g, '\n\n').trim();
+export function toFull(x) {
+  const rv = x.review || null;
+  return {
+    k: x.slug, id: x.id || '', name: String(x.name || '').trim(), alt: String(x.alt_name || '').trim(),
+    brand: x.brand || '', line: x.line || '', line_slug: x.line_slug || '',
+    url: `${SOURCE}/tobaccos/${x.slug}`, image: x.media ? `${SOURCE}/${x.media}` : '',
+    rating: Number(x.rating) || 0, ratings: parseInt(x.ratings_count, 10) || 0, reviews: parseInt(x.reviews, 10) || 0, views: x.views || '',
+    strength: x.strength || '', strength_votes: parseInt(x.strength_count, 10) || 0,
+    status: x.status || 'Выпускается', status_id: x.status_id || '',
+    tags: (Array.isArray(x.tags) ? x.tags : []).map((t) => ({ name: t.name, group: t.group, taste: t.taste })),
+    review: rv ? { score: Number(rv.score) || 0, date: (rv.created && rv.created.date) || '', user: (rv.user && rv.user.name) || '', text: plain(rv.content).slice(0, 1500) } : null,
+  };
 }
 
 /* ═════════════════════════ Служебные страницы ═════════════════════════ */
@@ -1888,7 +1993,7 @@ const brands=${JSON.stringify(brands)},log=document.getElementById('log');
 (async()=>{for(const b of brands){const p=document.createElement('p');p.textContent=b+': загружаю…';log.append(p);
 try{let r;for(let i=0;i<40;i++){r=await fetch(location.pathname+location.search+'&brand='+encodeURIComponent(b)).then(r=>r.json());
 if(!r.ok||!r.partial)break;p.textContent=b+': скачано '+r.got+', продолжаю…';}
-p.textContent=r.ok?(r.partial?'⏸ '+b+': скачано '+r.got+', докачаю сам в течение часа':'✅ '+b+': '+r.total+' вкусов на сайте, из них в продаже '+r.active+(r.before?' (было '+r.before+')':'')):'❌ '+b+': '+r.error;}
+p.textContent=r.ok?(r.partial?'⏸ '+b+': скачано '+r.got+', докачаю сам в течение часа':'✅ '+b+': '+r.total+' вкусов в '+r.lines+' линейках, из них выпускается '+r.active+', снято с производства '+(r.total-r.active)+(r.before?' (было '+r.before+')':'')+(r.news&&r.news.added.length?', новых вкусов: '+r.news.added.length:'')+(r.skipped&&r.skipped.length?' ⚠️ не открылись линейки: '+r.skipped.join(', '):'')):'❌ '+b+': '+r.error;}
 catch(e){p.textContent='❌ '+b+': '+e.message;}}
 const d=document.createElement('p');d.textContent='Готово. Наличие пересопоставится само в течение 15 минут, или сразу — командой /stock в боте.';log.append(d);})();
 </script>`;
@@ -2031,7 +2136,9 @@ const groupCache = new Map();
 function groupInfo(group, brandNames) {
   const ck = group + '\u0001' + brandNames.join('|');
   if (groupCache.has(ck)) return groupCache.get(ck);
-  const brand = brandNames.find((b) => squash(group).includes(squash(b))) || null;
+  // Самое длинное подходящее название бренда: «Spectrum Hard Line» важнее, чем просто «Spectrum»,
+  // если на htreviews линейки заведены отдельными брендами.
+  const brand = [...brandNames].sort((a, b) => squash(b).length - squash(a).length).find((b) => squash(b) && squash(group).includes(squash(b))) || null;
   let info = null;
   if (brand && !/сигар[аы]/i.test(group)) {
     const brandRe = new RegExp(escRe(brand), 'gi');
