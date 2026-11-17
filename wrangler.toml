@@ -36,12 +36,12 @@ id = "feb60298be7e4467a50ee0c889bafdc6"
 # ── Все правила, тексты и параметры бота — в этой Google Таблице ──
 # Доступ к таблице: «Все, у кого есть ссылка» — «Читатель» (иначе бот её не прочитает),
 # редактировать — только приглашённым.
-CONFIG_SHEET_ID = "1iRdMg7O_PXx5F8KR-CfUTeQE9tgrafuypsZxG6MHz_4"
+# CONFIG_SHEET_ID — ID таблицы, хранится в Cloudflare Secrets (не в этом файле).
 
 # Скрипт Google, подключённый к таблице (Расширения → Apps Script): пишет журнал во вкладку «Журнал»
 # и отдаёт боту настройки — тогда таблицу можно закрыть от посторонних. Пусто — журнала нет, настройки читаются по ссылке.
 # Секрет к нему — SHEET_SECRET в Cloudflare (тот же, что константа SECRET в скрипте).
-SHEET_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbxUzkkxg1DCU-rGxuuSGd37haRnnMhg3M9DX-OUt3WR55t67ztO0mCaEy2PzOCSd_H_/exec"
+# SHEET_SCRIPT_URL — адрес скрипта, хранится в Cloudflare Secrets (не в этом файле).
 
 # Запасной список админов (Telegram ID через запятую) — на случай, если admins во вкладке «Настройки» пустой.
 # Свой ID можно узнать командой /id у бота.
@@ -75,3 +75,5 @@ CLAUDE_MODEL_FAST = "claude-haiku-5-5"
 #   LLM_API_KEY     — ключ Anthropic (для Claude)
 #   IMAGE_API_KEY   — ключ OpenAI (ChatGPT: и тексты, и картинки)
 #   SHEET_SECRET    — секрет скрипта Google (журнал и чтение закрытой таблицы)
+#   CONFIG_SHEET_ID — ID Google Таблицы с настройками
+#   SHEET_SCRIPT_URL — адрес скрипта Google (веб-приложение Apps Script)
