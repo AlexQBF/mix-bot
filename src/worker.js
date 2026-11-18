@@ -180,7 +180,7 @@ export const DEFAULT_INSTRUCTION = [
   'КАРТИНКА: КРУГИ',
   'Одна квадратная картинка на все три микса, премиальная рекламная фуд-съёмка сверху. Светлый почти белый фон с лёгкой серой геометрией: тонкие круги, треугольники, плюсики, пунктир, штриховка.',
   'Композиция занимает весь квадрат, без больших пустых мест. Сверху по центру оставь небольшое пустое место под логотип (чуть меньше трети ширины) — его добавят отдельно: ничего там не рисуй и не пиши, никаких рамок и плашек, просто тот же фон. Верхние углы заполни ингредиентами так же плотно, как нижние, вплотную к этому месту.',
-  'В середине кадра в один ряд три крупных круга одинакового размера — микс 1, 2, 3 слева направо. Каждый круг — густые глянцевые соусы цвета вкусов микса, перетекающие друг в друга как инь-ян, с капелькой снизу.',
+  'В середине кадра в один ряд три крупных круга одинакового размера — микс 1, 2, 3 слева направо. Каждый круг — густые глянцевые соусы цвета вкусов микса, перетекающие друг в друга как инь-ян, с капелькой снизу. Соусы как настоящая еда крупным планом: с натуральной фактурой каждого вкуса — семечки, мякоть, цедра, кусочки ягод, листочки, крошка — и мягкими разводами, как от кисти. Не гладкие однотонные «пластиковые» диски.',
   'Рядом с каждым соусом, снаружи круга, — короткая подпись вкуса: «печенье», «карамель», «лимон». Мелко, аккуратно, тёмно-серым. Без линий, стрелок и выносок — и так понятно, к чему подпись.',
   'Под каждым кругом — название этого микса заглавными буквами в одну строку: строгий геометрический шрифт средней жирности, тёмно-графитовый, некрупно. Цифр и номеров нет.',
   'По краям и в нижних углах кадра свежие ингредиенты миксов, частично обрезанные краем. Сочные цвета, мягкие тени. Без брендов и процентов. Без людей, рук, кальянов, сигарет и дыма.',
@@ -1042,7 +1042,7 @@ async function onText(env, msg, ctx) {
 }
 
 /** /config — коротко, что сейчас действует. */
-const CODE_VERSION = '12.25 · 36 (ответ ИИ с лишними кавычками чинится сам; подписи на картинке как раньше)';
+const CODE_VERSION = '12.26 · 37 (соусы на картинке — с натуральной фактурой; ответ ИИ с кавычками чинится сам)';
 export function configSummary(cfg, env = {}, stock = null) {
   const at = cfg._at ? new Date(cfg._at).toLocaleString('ru-RU', { timeZone: 'Europe/Moscow', day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) + ' МСК' : 'ещё не загружалась — работают значения из кода';
   const s = cfg.settings;
@@ -1492,7 +1492,7 @@ export function composePrompt(cfg, lang = 'ru') {
     '- Табаки с пометкой ★ клиент назвал сам: такой табак должен быть в КАЖДОМ из трёх миксов, в разных сочетаниях.\n' +
     '- title и text пиши на ' + t.llmLang + ' языке. Названия брендов и табаков не переводи.\n' +
     '- strength — итоговая крепость микса числом от 1 до 5 (1 лёгкая, 2 средне-лёгкая, 3 средняя, 4 средне-крепкая, 5 крепкая), с учётом инструкции.\n' +
-    '- У каждого табака "look" НА АНГЛИЙСКОМ: густой глянцевый соус цвета этого вкуса, 3–6 слов ("glossy deep purple blackberry syrup").\n' +
+    '- У каждого табака "look" НА АНГЛИЙСКОМ: густой глянцевый соус цвета этого вкуса с его натуральной фактурой, 4–8 слов ("glossy deep purple blackberry jam with seeds", "frosty mint sauce with tiny herb flecks", "icy pale blue glaze with sugar crystals"). Гладкой однотонной заливки без фактуры быть не должно.\n' +
     '- garnish в каждом миксе — НА АНГЛИЙСКОМ свежие ингредиенты этого микса, 3–5 штук через запятую.\n' +
     '- image — задание для модели рисования НА АНГЛИЙСКОМ, 80–180 слов: одна картинка на все три микса строго по разделу инструкции про картинку, ' +
     'с конкретным описанием изображения каждого микса (слева направо — микс 1, 2, 3): что нарисовано, цвета, ингредиенты. Без людей, кальянов, сигарет и дыма.\n' +
@@ -1849,8 +1849,10 @@ const IMAGE_TEXT_RULES = 'Text in the image: the "SIGMA MIX" logo; the name of e
   'Flavor labels: small, neat, unobtrusive dark-grey sans-serif words in lowercase, strictly horizontal, no tilt, no handwriting, no script. ' +
   'Mix names: clean geometric sans-serif capitals of medium-bold weight (not heavy black, not rounded or playful), dark charcoal, normal letter spacing, modest size — clearly smaller than the logo, each name on ONE line. ' +
   'All text spelled exactly as written, every letter fully legible, never overlapping the visuals or the logo. No brand names, no percentages, no other text. No people, no hands, no hookah, no cigarettes, no smoke.';
+// Фактура соусов: без этого модель часто рисует гладкие «пластиковые» диски.
+const SAUCE_TEXTURE = 'The sauces must look like real, appetizing food shot in macro: thick and glossy, with rich visible natural texture of each flavor — seeds, fruit pulp, zest, crushed berry pieces, herb flecks, crumbs, sugar crystals — plus soft brush-like swirl strokes and bright wet highlights. Edges slightly organic and hand-poured. Never smooth, flat, uniform plastic, gel or enamel discs.';
 const IMAGE_LABELS = {
-  'круги': 'Composition: fill the whole square — exactly three large round sauce swirls of the same size in one row in the vertical center, no big empty areas, especially below the swirls. ' + IMAGE_TEXT_RULES,
+  'круги': 'Composition: fill the whole square — exactly three large round sauce swirls of the same size in one row in the vertical center, no big empty areas, especially below the swirls. ' + SAUCE_TEXTURE + ' ' + IMAGE_TEXT_RULES,
   'образы': 'Composition: fill the whole square — exactly three large, clearly different hero objects of similar size in one row in the vertical center, each one depicting its own mix as the dessert, drink or dish from its name; no abstract circles, no repeated shapes, no big empty areas. ' + IMAGE_TEXT_RULES,
 };
 // Место под готовый логотип: сверху по центру. Те же доли использует наложение (LOGO_BOX).
@@ -1862,7 +1864,7 @@ const IMAGE_TEMPLATE = {
   background: 'Square premium advertising poster for flavor mixes, top-down view, light off-white studio background with subtle minimal light-grey geometric decorations: thin outline circles, small solid triangles, plus signs, dashed lines and diagonal hatching',
   logo: 'At the top center, a modern logo: the word "SIGMA" in thin black sans-serif capitals, directly below it the word "MIX" in heavy bold black sans-serif capitals',
   layout: 'Below the logo, {count} separate round swirls of the same size arranged in one horizontal row from left to right, evenly spaced',
-  swirl: 'Each swirl is made of thick glossy liquid sauces flowing into each other like a yin-yang, with clear borders between colors, realistic shiny reflections and one small drip at the bottom edge',
+  swirl: 'Each swirl is made of thick glossy liquid sauces flowing into each other like a yin-yang, with clear borders between colors, rich visible natural texture (seeds, pulp, zest, herb flecks, crushed berry pieces), soft brush-like swirl strokes, realistic shiny reflections and one small drip at the bottom edge',
   garnish: 'Fresh ingredients scattered around the edges of the frame, partially cropped',
   quality: 'High-end commercial food photography, soft natural shadows, vibrant saturated colors, crisp focus, clean balanced composition, lots of white space',
 };
