@@ -677,6 +677,13 @@ async function cronConfig(env) {
     const n = await resolveStock(env, r.cfg, r.stock.rows).catch((e) => (console.log('resolveStock', e.message), 0));
     if (n) await notifyAdmins(env, '📦 Разобрал с помощью ИИ нераспознанные позиции склада.\n' + stockReport(await env.KV.get('stock', 'json')).slice(0, 3500));
   }
+  if (r.ok && r.stock && r.stock.rows) {
+    const found = await probeStock(env, r.cfg).catch((e) => (console.log('probe', e.message), []));
+    if (found.length) {
+      await syncStock(env, r.stock.rows, r.cfg, true, r.stock.rows.match).catch((e) => console.log('probe resync', e.message));
+      await notifyAdmins(env, probeText(found).slice(0, 3800));
+    }
+  }
   await crawlMissingBrand(env);
 }
 
@@ -896,6 +903,7 @@ async function onText(env, msg, ctx) {
         const map = (await env.KV.get('stockmap', 'json').catch(() => null)) || {};
         for (const k of Object.keys(map)) if (!map[k]) delete map[k];
         await env.KV.put('stockmap', JSON.stringify(map));
+        await env.KV.delete('probe').catch(() => {}); // и прямые ссылки попробуем заново
       }
       try {
         const rows = await fetchStockRows(env);
@@ -903,6 +911,12 @@ async function onText(env, msg, ctx) {
         if (st.state === 'ok' && st.pending) {
           await send(env, chat, `Нашёл сразу ${st.flavors} вкусов, ещё ${st.pending} позиций отдаю ИИ на разбор — это до минуты…`);
           await resolveStock(env, cfg, rows);
+        }
+        const left = ((await env.KV.get('stock', 'json').catch(() => null)) || {}).unmatched || [];
+        if (left.some((u) => u.tried)) {
+          await send(env, chat, `🔎 ${left.length} позиций нет в списках htreviews — ищу их страницы на сайте по прямым ссылкам…`);
+          const found = await probeStock(env, cfg, fetch, PROBE_BUDGET_CMD);
+          if (found.length) { await syncStock(env, rows, cfg, true, rows && rows.match); await send(env, chat, esc(probeText(found)).slice(0, 3800)); }
         }
       } catch (e) {
         return send(env, chat, '❌ Не получилось прочитать наличие: ' + esc(e.message));
@@ -974,7 +988,7 @@ async function onText(env, msg, ctx) {
 }
 
 /** /config — коротко, что сейчас действует. */
-const CODE_VERSION = '12.14 · 25 (полный справочник: все линейки и атрибуты, сводка новинок, /refresh в боте)';
+const CODE_VERSION = '12.15 · 26 (вкусы, которых нет в списках htreviews, — по прямой ссылке)';
 export function configSummary(cfg, env = {}, stock = null) {
   const at = cfg._at ? new Date(cfg._at).toLocaleString('ru-RU', { timeZone: 'Europe/Moscow', day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) + ' МСК' : 'ещё не загружалась — работают значения из кода';
   const s = cfg.settings;
@@ -1928,6 +1942,9 @@ export async function crawlBrand(env, slug, fetcher = fetch, waits, maxPages = C
   if (!items.length) throw new Error(`${slug}: пустой список, старые данные не трогаю`);
   // Сайт отдал заметно меньше, чем было, — похоже на сбой сайта, а не на то, что вкусы исчезли.
   if (before >= 40 && items.length < before * 0.6) throw new Error(`${slug}: сайт отдал ${items.length} вкусов, а было ${before} — похоже на сбой сайта, старые данные не трогаю`);
+  // Вкусы, найденные по прямой ссылке (в общих списках сайта их нет), сохраняем и после перекачки.
+  const extra = await env.KV.get('catextra:' + slug, 'json').catch(() => null);
+  if (extra && extra.items) { const hv = new Set(items.map((x) => x.k)); for (const x of extra.items) if (!hv.has(x.k)) items.push(x); }
   const now = new Date().toISOString();
   await env.KV.put('cat:' + slug, JSON.stringify({ updated: now, total: items.length, items, lines: part.lines, skipped: part.skipped }));
   await env.KV.put('catx:' + slug, JSON.stringify({ updated: now, total: Object.keys(part.full).length, items: Object.values(part.full) })).catch((e) => console.log('catx', e.message));
@@ -1946,6 +1963,158 @@ export async function crawlBrand(env, slug, fetcher = fetch, waits, maxPages = C
     };
   }
   return { slug, total: items.length, active: items.filter((x) => !x.d).length, before, lines: part.lines.length, skipped: part.skipped, news };
+}
+
+/* ───────────── Поиск по прямой ссылке ─────────────
+ * Снятые с производства вкусы ещё выпускаемых линеек (Spectrum Classic Line — Rye Bread и т.п.) сайт в списки
+ * не включает вовсе — ни в бренд, ни в линейку, — но страница вкуса жива: htreviews.org/tobaccos/spectrum/classic-line/rye-bread.
+ * Для позиций склада, которых нет в справочнике, бот пробует такие адреса сам: бренд / каждая линейка той же крепости /
+ * название латиницей. Нашёл — разбирает страницу и добавляет вкус в справочник (KV catextra:<бренд>, переживает перекачку).
+ * Не нашёл ни по одному адресу — повторит через неделю.
+ */
+const PROBE_BUDGET = 8;          // адресов за одну 15-минутную проверку
+const PROBE_BUDGET_CMD = 20;     // по команде /stock
+
+/** Варианты адреса вкуса: «Queen's Hive» → queens-hive, queen-s-hive. */
+export function flavorSlugs(name) {
+  const base = latin(String(name).replace(/[()]/g, ' ').replace(/&/g, ' and ')).toLowerCase();
+  const a = base.replace(/['`]/g, '').replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+  const b = base.replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+  return [...new Set([a, b].filter(Boolean))];
+}
+
+/** Разбор страницы вкуса htreviews. vocab — известные теги и группы (из справочника), чтобы отличить их от прочего текста. */
+export function parseFlavorPage(html, vocab = { tags: new Map(), groups: new Map(), taste: new Map() }) {
+  html = String(html || '');
+  let ld = null;
+  for (const m of html.matchAll(/<script[^>]*application\/ld\+json[^>]*>([\s\S]*?)<\/script>/gi)) {
+    let j; try { j = JSON.parse(m[1]); } catch { continue; }
+    const list = Array.isArray(j) ? j : j && j['@graph'] ? j['@graph'] : [j];
+    ld = list.find((o) => o && o.name && (o.aggregateRating || o.brand)) || ld;
+  }
+  const lines = plain(html.replace(/<(script|style|noscript)[\s\S]*?<\/\1>/gi, ' ').replace(/<\/?(p|div|li|ul|h\d|span|a|td|tr|dt|dd|section|button|label|br)\b[^>]*>/gi, '\n'))
+    .split('\n').map((x) => x.replace(/\s+/g, ' ').trim()).filter(Boolean);
+  const junk = (x) => /^[*?\s]*$/.test(x);
+  const value = (label) => {
+    for (let i = 0; i < lines.length; i++) {
+      if (lines[i] === label) { for (let j = i + 1; j < Math.min(i + 4, lines.length); j++) if (!junk(lines[j])) return lines[j]; }
+      const m = lines[i].match(new RegExp('^' + label + '\\s+(.+)$'));
+      if (m) return m[1].trim();
+    }
+    return '';
+  };
+  const h1 = (html.match(/<h1[^>]*>([\s\S]*?)<\/h1>/i) || [])[1];
+  const name = String((ld && ld.name) || plain(h1 || '')).trim();
+  const line = value('Линейка');
+  if (!name || !line) return null;
+  const brandAt = lines.findIndex((x) => x === 'Бренд' || /^Бренд\s/.test(x));
+  const lineAt = lines.findIndex((x) => x === 'Линейка' || /^Линейка\s/.test(x));
+  let nameAt = -1;
+  for (let i = 0; i < (brandAt > 0 ? brandAt : lines.length); i++) if (lines[i] === name) nameAt = i;
+  const head = nameAt >= 0 && brandAt > nameAt ? lines.slice(nameAt + 1, brandAt) : [];
+  const desc = String((ld && ld.description) || '').trim();
+  const t = [], g = [];
+  let alt = '';
+  for (const x of head) {
+    const low = x.toLowerCase();
+    if (vocab.tags.has(low)) t.push(vocab.tags.get(low));
+    else if (vocab.groups.has(low)) g.push(vocab.groups.get(low));
+    else if (!alt && x !== desc && x.length < 60 && !/^[\d.,\s]+$/.test(x)) alt = x;
+  }
+  let s = 0;
+  for (const x of lines.slice(lineAt > 0 ? lineAt : 0)) { const v = STRENGTH[x.toLowerCase()]; if (v) { s = v; break; } }
+  const statusAt = lines.findIndex((x) => x === 'Статус' || /^Статус\s/.test(x));
+  const status = statusAt >= 0 ? (lines.slice(statusAt, statusAt + 5).join(' ').match(/снят с производства|выпускается|лимитированный/i) || [''])[0] : '';
+  const rating = (ld && ld.aggregateRating) || {};
+  return {
+    name, alt, line, s, desc, status: status || 'Выпускается', d: /снят/i.test(status),
+    r: Number(rating.ratingValue) || 0, c: parseInt(rating.reviewCount, 10) || 0,
+    t: [...new Set(t)], g: [...new Set(g)], q: [...new Set(t.map((x) => vocab.taste.get(x)).filter(Boolean))],
+  };
+}
+
+export async function probeStock(env, cfg, fetcher = fetch, budget = PROBE_BUDGET, waits = [3000]) {
+  const stock = await env.KV.get('stock', 'json').catch(() => null);
+  const todo = ((stock && stock.unmatched) || []).filter((u) => u.tried); // ИИ уже посмотрел и не нашёл
+  if (!todo.length) return [];
+  const state = (await env.KV.get('probe', 'json').catch(() => null)) || {};
+  const now = Date.now(), WEEK = 7 * 24 * 3600 * 1000;
+  const brands = cfg.brands.filter((b) => b.on);
+  const cats = {};
+  for (const b of brands) cats[b.code] = await env.KV.get('cat:' + b.code, 'json').catch(() => null);
+  const vocab = { tags: new Map(), groups: new Map(), taste: new Map() };
+  for (const c of Object.values(cats)) for (const x of (c && c.items) || []) {
+    for (const t of x.t || []) vocab.tags.set(t.toLowerCase(), t);
+    for (const gr of x.g || []) vocab.groups.set(gr.toLowerCase(), gr);
+    if ((x.t || []).length === 1 && (x.q || []).length === 1) vocab.taste.set(x.t[0], x.q[0]);
+  }
+  const headers = { 'user-agent': 'Mozilla/5.0 (compatible; VektorSigmaMixBot/1.0)', accept: 'text/html' };
+  const found = [];
+  for (const u of todo) {
+    if (budget <= 0) break;
+    let st = state[u.id];
+    if (st && st.done && now - st.at < WEEK) continue;
+    if (!st || st.done) st = state[u.id] = { tried: [], at: now };
+    const b = brands.find((x) => cats[x.code] && (cats[x.code].items || []).some((it) => it.b === u.brand));
+    if (!b) { Object.assign(st, { done: true, at: now }); continue; }
+    const cat = cats[b.code];
+    // Линейки бренда: из адресов вкусов (там бывают и старые: spectrum-main) и со страницы бренда.
+    const segs = new Map();
+    for (const it of cat.items) { const p = it.k.split('/'); if (p.length === 3 && !segs.has(p[1])) segs.set(p[1], it.l); }
+    for (const l of cat.lines || []) { const sg = l.split('/')[1]; if (sg && !segs.has(sg)) segs.set(sg, ''); }
+    const want = squash(u.line);
+    const keyWords = words(u.line).filter((w) => w.length > 2 && !/^(line|линейка)$/i.test(w)).map(squash);
+    const ranked = [...segs].map(([sg, l]) => {
+      if (l && lineScore(u.line, l) <= -3) return { sg, score: -1 }; // другая крепость
+      const hay = squash(l) + '|' + squash(sg);
+      const score = (l && squash(l) === want) || squash(sg) === want ? 3 : keyWords.some((w) => hay.includes(w)) ? 2 : 1;
+      return { sg, score };
+    }).filter((x) => x.score >= 0).sort((x, y) => y.score - x.score).slice(0, 6);
+    const urls = ranked.flatMap((x) => flavorSlugs(u.flavor).map((f) => `${SOURCE}/tobaccos/${b.code}/${x.sg}/${f}`)).filter((x) => !st.tried.includes(x));
+    for (const url of urls) {
+      if (budget <= 0) break;
+      budget--;
+      st.tried.push(url);
+      let r;
+      try { r = await fetchRetry(fetcher, url, { headers }, waits); } catch { continue; }
+      if (!r.ok || r.redirected || (r.url && r.url.replace(/\/$/, '') !== url)) continue;
+      const p = parseFlavorPage(await r.text(), vocab);
+      if (!p || lineScore(u.line, p.line) <= -3) continue; // другая по крепости линейка — не то
+      const k = url.slice((SOURCE + '/tobaccos/').length);
+      found.push({ code: b.code, u, it: { k, n: p.name, a: p.alt, b: u.brand, l: p.line, s: p.s, r: p.r, c: p.c, t: p.t, g: p.g, q: p.q, v: 0, x: 1, ...(p.d ? { d: 1 } : {}) } });
+      Object.assign(st, { done: true, at: now, key: k });
+      break;
+    }
+    if (!st.done && urls.every((x) => st.tried.includes(x))) Object.assign(st, { done: true, at: now });
+  }
+  await env.KV.put('probe', JSON.stringify(state)).catch(() => {});
+  if (!found.length) return [];
+  const map = (await env.KV.get('stockmap', 'json').catch(() => null)) || {};
+  const meta = (await env.KV.get('catmeta', 'json').catch(() => null)) || {};
+  for (const code of [...new Set(found.map((f) => f.code))]) {
+    const mine = found.filter((f) => f.code === code);
+    const cat = cats[code];
+    const have = new Set(cat.items.map((x) => x.k));
+    for (const f of mine) if (!have.has(f.it.k)) { cat.items.push(f.it); have.add(f.it.k); }
+    cat.total = cat.items.length;
+    await env.KV.put('cat:' + code, JSON.stringify(cat));
+    const extra = (await env.KV.get('catextra:' + code, 'json').catch(() => null)) || { items: [] };
+    const ex = new Set(extra.items.map((x) => x.k));
+    for (const f of mine) if (!ex.has(f.it.k)) extra.items.push(f.it);
+    await env.KV.put('catextra:' + code, JSON.stringify(extra));
+    meta[code] = { ...(meta[code] || {}), total: cat.items.length, probed: new Date().toISOString() };
+  }
+  for (const f of found) map[f.u.id] = f.it.k;
+  await env.KV.put('stockmap', JSON.stringify(map));
+  await env.KV.put('catmeta', JSON.stringify(meta)).catch(() => {});
+  catCache = { at: 0, sig: '', items: [] };
+  return found;
+}
+
+/** Сообщение админам о найденном по прямой ссылке. */
+export function probeText(found) {
+  return '🔎 Нашёл на htreviews по прямой ссылке (в общих списках сайта этих вкусов нет), теперь они в подборе:\n' +
+    found.map((f) => `• ${f.it.b} ${f.it.l} — ${f.it.n}${f.it.a ? ' (' + f.it.a + ')' : ''}${f.it.d ? ', снят с производства' : ''}`).join('\n');
 }
 
 /**
@@ -2249,6 +2418,7 @@ export function matchStock(positions, catalog, map = {}, manual = {}) {
   const add = (b, name, it) => { const q = squash(name); if (q.length < 2) return; const k = b + '|' + q; (index.get(k) || index.set(k, []).get(k)).push(it); };
   for (const it of catalog) { add(it.b, it.n, it); if (it.a) add(it.b, it.a, it); }
   const known = new Set(catalog.map((x) => x.k));
+  const extraKeys = new Set(catalog.filter((x) => x.x).map((x) => x.k)); // найдены по прямой ссылке
   const items = {}, unmatched = [];
   let tobaccos = 0;
   const done = new Map(); // одна и та же позиция в разных фасовках ищется один раз
@@ -2259,15 +2429,16 @@ export function matchStock(positions, catalog, map = {}, manual = {}) {
     tobaccos++;
     if (!done.has(e.id)) {
       let key = manual[e.id], who = 'вручную';
-      if (key === undefined) { key = map[e.id]; who = 'ИИ'; }
+      if (key === undefined) { key = map[e.id]; who = known.has(key) && extraKeys.has(key) ? 'прямая ссылка htreviews' : 'ИИ'; }
       if (key && !known.has(key)) key = undefined; // ответ указывает на табак, которого в справочнике больше нет
-      if (key === undefined) {
-        who = 'по названию';
+      // Своё совпадение по названию проверяем и тогда, когда ИИ раньше ответил «нет»: справочник мог пополниться.
+      if (key === undefined || (key === '' && who === 'ИИ')) {
         const hits = [...new Set(e.names.flatMap((v) => index.get(e.brand + '|' + squash(v)) || []))]
           .map((it) => ({ it, line: lineScore(e.line, it.l) }))
           .sort((x, y) => y.line - x.line || (y.it.c || 0) - (x.it.c || 0));
         // Совпало название, но линейка явно другая (Strong ↔ Medium) — не берём: это другой по крепости табак.
-        key = hits.length && hits[0].line > -3 ? hits[0].it.k : undefined;
+        const k2 = hits.length && hits[0].line > -3 ? hits[0].it.k : undefined;
+        if (k2) { key = k2; who = extraKeys.has(k2) ? 'прямая ссылка htreviews' : 'по названию'; } else if (key === undefined) who = 'по названию';
       }
       done.set(e.id, key);
       pairs.set(e.id, { pos: `${e.brand} | ${e.line} | ${e.flavor}`, key: key || '', who: key === undefined ? 'ждёт разбора ИИ' : who, w: [] });
