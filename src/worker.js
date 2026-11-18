@@ -56,7 +56,7 @@ export const DEFAULT_TEXTS = {
   progress: ['📦 Шуршим пакетиками с табаком… | 👃 Принюхиваемся к вкусам… | 🗄 Перебираем полки с банками… | ⚖️ Отмеряем граммы… | 🧪 Пробуем сочетания… | 🍋 Добавляем кислинку… | 🍯 Проверяем, не слишком ли сладко… | 🧊 Кидаем лёд в колбу… | 🔥 Раздуваем угли… | 🫧 Продуваем шахту… | 🤔 Спорим с кальянщиком о пропорциях… | ✍️ Придумываем названия… | 💋 Подбираем слова повкуснее… | 🎨 Смешиваем краски для картинки… | 🖌 Рисуем твои миксы… | 📸 Выставляем свет… | ✨ Наводим глянец… | 🧐 Проверяем, что всё сходится… | 🎁 Упаковываем красиво… | 💨 Почти готово, выдыхаем…',
     '📦 Խշխշացնում ենք ծխախոտի տուփերը… | 👃 Հոտոտում ենք համերը… | 🗄 Նայում ենք դարակները… | ⚖️ Չափում ենք գրամները… | 🧪 Փորձում ենք համադրությունները… | 🍋 Ավելացնում ենք թթվաշություն… | 🍯 Ստուգում ենք՝ շատ քաղցր չէ՞… | 🧊 Սառույց ենք գցում կոլբայի մեջ… | 🔥 Վառում ենք ածուխները… | 🫧 Փչում ենք նարգիլեն… | 🤔 Վիճում ենք վարպետի հետ համամասնությունների մասին… | ✍️ Անուններ ենք հորինում… | 💋 Համեղ բառեր ենք ընտրում… | 🎨 Խառնում ենք ներկերը նկարի համար… | 🖌 Նկարում ենք քո միքսերը… | 📸 Լույսն ենք ուղղում… | ✨ Փայլ ենք տալիս… | 🧐 Ստուգում ենք, որ ամեն ինչ համընկնի… | 🎁 Գեղեցիկ փաթեթավորում ենք… | 💨 Գրեթե պատրաստ է…',
     'Фразы, которые сменяют друг друга, пока бот думает. Разделяются знаком |'],
-  strength_remembered: ['Крепость — как в прошлый раз: {s}. Захочешь иначе — просто напиши.', 'Թնդությունը՝ նախորդի պես․ {s}։ Եթե ուզում ես այլ կերպ, պարզապես գրիր։',
+  strength_remembered: ['{s} — как ты любишь. Хочешь поменять — скажи.', '{s}՝ ինչպես սիրում ես։ Ուզում ես փոխել՝ ասա։',
     'Под «Подбираю миксы…», если бот взял крепость из прошлого запроса'],
   out_of_stock: ['Сейчас нет в наличии: {name}. Собрали миксы с похожим вкусом из того, что есть 👇', 'Հիմա առկա չէ՝ {name}։ Հավաքել ենք նման համով միքսեր առկա տեսականուց 👇',
     'Строка перед миксами, если клиент попросил табак, которого нет в наличии'],
@@ -130,6 +130,8 @@ export const DEFAULT_SETTINGS = [
   { key: 'badge_overlay', def: 'да', type: 'yesno', desc: 'Добавлять на картинку значок магазина в левый верхний угол (файл src/badge.png) (да / нет). Работает вместе с logo_overlay.' },
   { key: 'strength_memory_hours', def: '3', type: 'int', min: 0, max: 72,
     desc: 'Сколько часов бот помнит выбранную клиентом крепость и не переспрашивает в следующих запросах. 0 — спрашивать каждый раз.' },
+  { key: 'prefer_small_packs', def: 'да', type: 'yesno',
+    desc: 'Беречь корзину клиента (да / нет): дополнения к базе (доля до 30%) бот берёт из табаков, у которых есть маленькая пачка (до 40 г). Табак, который есть только в большой пачке, идёт базой или если равноценной замены в маленькой пачке нет. «нет» — фасовка на подбор не влияет.' },
   { key: 'only_in_stock', def: 'да', type: 'yesno', desc: 'Только то, что есть на складе (да / нет). Заработает, когда подключим выгрузку склада; до этого — все вкусы наших брендов.' },
   { key: 'images', def: 'да', type: 'yesno', desc: 'Рисовать картинку к миксам (да / нет). Как она выглядит — во вкладке «Инструкция».' },
   { key: 'image_style', def: 'круги', type: 'choice', options: { 'круги': ['круги', 'кружки', 'соусы', 'circles'], 'образы': ['образы', 'образ', 'предметы', 'objects'] },
@@ -641,6 +643,10 @@ const HELPER_GROUPS = ['Освежающий', 'Цитрусовый', 'Ягод
  * рейтинговее и популярнее, но вкус клиента всё равно главнее: совпадение одного тега весит 3.
  */
 const POP_PRIOR = 3.7, POP_WEIGHT = 10;
+const PACK_SMALL = 40; // пачка до 40 г — «маленькая»: её не жалко взять ради пары чаш
+/** Табак есть на складе только в большой пачке (100–250 г). Фасовка неизвестна — не считаем большой. */
+export const bigOnly = (it) => Array.isArray(it.w) && it.w.length > 0 && Math.min(...it.w) > PACK_SMALL;
+const PACK_PENALTY = 0.6;  // для сравнения: совпадение тега весит 3, разница рейтинга 4.6 и 4.0 — около 0.9
 export function popularity(it) {
   const c = it.c || 0;
   if (!c || !it.r) return -0.3;                          // нет оценок (в том числе свои карточки) — чуть ниже прочих
@@ -1028,7 +1034,7 @@ async function onText(env, msg, ctx) {
 }
 
 /** /config — коротко, что сейчас действует. */
-const CODE_VERSION = '12.17 · 28 (подбор: при равном вкусе — рейтинговее и популярнее по htreviews)';
+const CODE_VERSION = '12.20 · 31 (бренд в сообщении клиента — не название табака; маленькие пачки; фраза про крепость)';
 export function configSummary(cfg, env = {}, stock = null) {
   const at = cfg._at ? new Date(cfg._at).toLocaleString('ru-RU', { timeZone: 'Europe/Moscow', day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) + ' МСК' : 'ещё не загружалась — работают значения из кода';
   const s = cfg.settings;
@@ -1052,7 +1058,7 @@ export function configSummary(cfg, env = {}, stock = null) {
     `Логотип на картинке: ${s.logo_overlay ? (env.IMAGES ? 'готовый файл' : 'рисует модель (нет привязки IMAGES в wrangler.toml)') : 'рисует модель'}\n` +
     `Стиль картинки: ${esc(s.image_style)} (${mixInstruction(cfg.instruction, s.image_style).fromTable ? 'раздел из таблицы' : 'текст из кода'})\n` +
     stockLine(stock ? { state: 'ok', ...stockStats(stock) } : null) + '\n' +
-    `Крепкое только по запросу: ${yn(s.strong_only_on_request)} · только из наличия: ${yn(s.only_in_stock)} · картинки: ${yn(s.images)}\n` +
+    `Крепкое только по запросу: ${yn(s.strong_only_on_request)} · только из наличия: ${yn(s.only_in_stock)} · беречь корзину (маленькие пачки): ${yn(s.prefer_small_packs)} · картинки: ${yn(s.images)}\n` +
     `Админов: ${s.admins.length + String(env.ADMIN_IDS || '').split(',').filter((x) => x.trim()).length}\n\n` +
     'Изменения в таблице подтягиваются сами раз в 15 минут, или сразу — командой /reload.';
 }
@@ -1334,7 +1340,7 @@ async function extractPrefs(env, text, prev = '') {
   return {
     relevant: !out || out.relevant !== false, // если ИИ не ответил — не блокируем человека
     like: arr(out && out.like), avoid: arr(out && out.avoid), groups: arr(out && out.groups),
-    flavors: arr(out && out.flavors), brands: arr(out && out.brands), strength, followup: !!(prev && out && out.followup === true),
+    flavors: arr(out && out.flavors), brands: arr(out && out.brands), other_brands: arr(out && out.other_brands), strength, followup: !!(prev && out && out.followup === true),
   };
 }
 
@@ -1345,12 +1351,13 @@ export function parsePrompt(cfg, catalog = [], withPrev = false) {
   return splitInstruction(cfg.instruction).parse.join('\n') + '\n\n' +
     'ТЕХНИЧЕСКИЕ ТРЕБОВАНИЯ:\n' +
     'Верни ТОЛЬКО JSON без пояснений:\n' +
-    '{"relevant":true,"like":[],"avoid":[],"groups":[],"flavors":[],"brands":[],"strength":"light|medium|strong|any|unknown"' + (withPrev ? ',"followup":false' : '') + '}\n' +
+    '{"relevant":true,"like":[],"avoid":[],"groups":[],"flavors":[],"brands":[],"other_brands":[],"strength":"light|medium|strong|any|unknown"' + (withPrev ? ',"followup":false' : '') + '}\n' +
     '- relevant: false, если сообщение не по теме.\n' +
     '- like — вкусы, которые клиент хочет, avoid — которых не хочет: по одному слову в именительном падеже ("Малина", "Лайм", "Мята"), ВСЕГДА по-русски (с армянского переводи).\n' +
     '- groups: подходящие направления строго из списка: ' + (groups.join(', ') || 'Фруктовый, Ягодный, Цитрусовый, Освежающий, Десертный') + '.\n' +
     '- flavors: конкретные табаки, которые клиент назвал. Если узнаёшь табак — в оригинальном написании ("Creme Brulee", "Epic Mint"), иначе как написал клиент.\n' +
     '- brands: бренды, которые клиент любит, строго из списка: ' + (brands.join(', ') || '—') + '. Написание клиента сопоставь с ближайшим брендом из списка.\n' +
+    '- other_brands: бренды, которые клиент назвал, но которых нет в списке выше (Darkside, Musthave, Snobless, Black Burn и т.п.). Бренд — это не табак: в flavors названия брендов не клади, даже если у другого бренда есть табак с таким же названием. Вкусы, которые клиент любит у этих брендов, — в like.\n' +
     '- strength: light — курит лёгкое, medium — среднее, strong — крепкое, any — всё равно, unknown — не сказал.' +
     (withPrev ? '\n- followup: тебе дан предыдущий запрос клиента и его новое сообщение. true — ТОЛЬКО если новое сообщение без предыдущего неполно: в нём нет своего вкуса или идеи, оно лишь уточняет прошлое («то же самое, только лёгкое», «такое же направление», «а без мяты?», «ещё что-нибудь такое», «полегче»). Тогда вкусы, табаки и общую идею бери из ОБОИХ сообщений вместе, а там, где они расходятся (крепость, «без …»), главнее новое. false — если в новом сообщении названы свои вкусы, напиток, блюдо или образ («джин с огурцом», «хочу ягодное», «что-нибудь с манго»): это новая просьба, предыдущий запрос не учитывай вообще, ни одного вкуса из него не бери. Сомневаешься — false.' : '');
 }
@@ -1390,17 +1397,20 @@ export function pickCandidates(catalog, prefs, used = [], more = false, cfg = DE
     if (brands.some((b) => similarName(b, it.b))) score += 1.5;
     const base = score;
     score += popularity(it);
+    if (st.prefer_small_packs && bigOnly(it)) score -= PACK_PENALTY;
     if (usedSet.has(it.k)) score -= 3;
     score += Math.random() * jitter;
     scored.push({ it, score, base });
   }
 
+  const pen = (it) => (st.prefer_small_packs && bigOnly(it) ? 0.5 : 0);
   const main = scored.filter((x) => x.base > 0).sort((a, b) => b.score - a.score).slice(0, CANDIDATES);
   const chosen = new Set(main.map((x) => x.it.k));
   // «Помощники» для баланса: свежесть, цитрус, кислые ягоды с хорошим рейтингом.
   const helpers = scored
     .filter((x) => !chosen.has(x.it.k) && x.it.c >= 5 && (x.it.g.some((g) => HELPER_GROUPS.includes(g)) || (x.it.q || []).some((q) => HELPER_TASTES.includes(q))))
-    .sort((a, b) => b.it.r - a.it.r + (b.score - a.score) * 0.1)
+    // «Помощники» почти всегда идут дополнением на 10–20% — ради них большую пачку покупать обиднее всего.
+    .sort((a, b) => (b.it.r - (pen(b.it))) - (a.it.r - pen(a.it)) + (b.score - a.score) * 0.1)
     .slice(0, HELPERS);
   return [...main, ...helpers].map((x) => x.it);
 }
@@ -1417,8 +1427,11 @@ export function composePrompt(cfg, lang = 'ru') {
     (cfg.limits.length ? 'ОБЯЗАТЕЛЬНЫЕ ОГРАНИЧЕНИЯ ОТ КОМАНДЫ — они важнее всего остального:\n' + cfg.limits.map((x) => '- ' + x).join('\n') + '\n\n' : '') +
     // ↓ технические рамки и формат ответа: от них зависит, сможет ли бот разобрать ответ.
     'ТЕХНИЧЕСКИЕ ТРЕБОВАНИЯ:\n' +
-    '- Собери ровно 3 микса ТОЛЬКО из табаков списка. Формат строки списка: номер|табак|крепость по htreviews|рейтинг (число оценок)|вкусы [группы] {характер вкуса: сладкий, кислый, терпкий, освежающий…}. Характер вкуса помогает балансу: сладкое уравновешивай кислым или освежающим.\n' +
+    '- Собери ровно 3 микса ТОЛЬКО из табаков списка. Формат строки списка: номер|табак|крепость по htreviews|рейтинг (число оценок)|вкусы [группы] {характер вкуса: сладкий, кислый, терпкий, освежающий…}|пачки на складе, г. Характер вкуса помогает балансу: сладкое уравновешивай кислым или освежающим.\n' +
     '- Рейтинг и число оценок — с htreviews. Из табаков с одинаковым вкусом и подходящей крепостью бери тот, у кого рейтинг выше; при близком рейтинге — у кого больше оценок (ему больше доверия). Табаки без рейтинга («-») бери, только если без них не собрать то, что просит клиент.\n' +
+    (st.prefer_small_packs ? `- Фасовка. Чаша — ${st.bowl_grams} г, клиент покупает пачки целиком. Пометка «только 100 г» / «только 200 г» значит, что табак есть лишь в большой пачке. ` +
+      'Такой табак ставь базой микса. Дополнением (доля до 30%) бери его, только если в списке нет табака с тем же вкусом в маленькой пачке и близким рейтингом (разница до 0.3) — ' +
+      'ради щепотки клиент большую пачку не купит. Вкус и просьба клиента важнее фасовки: если без этого табака микс получится хуже — оставь его. Табаки с ★ бери в любой фасовке.\n' : '') +
     '- Никогда не возвращай пустой список миксов и не проси что-то добавить. Если табака или вкуса, который назвал клиент, в списке нет — подбери самое близкое по вкусу из списка.\n' +
     `- В миксе от ${st.min_tobaccos} до ${st.max_tobaccos} табаков, доли — целые числа, кратные ${st.share_step}, в сумме ровно 100.\n` +
     (st.base_share ? `- В каждом миксе один табак — база: его доля не меньше ${st.base_share}%. Остальные табаки — дополнения к базе: подбирай их под её вкус, чтобы они подчёркивали или оттеняли базу, а не спорили с ней.\n` : '') +
@@ -1445,7 +1458,8 @@ async function composeMixes(env, session, candidates, lang = 'ru', cfg = DEFAULT
   const lines = candidates.map((it, i) =>
     `${asked.has(it.k) ? '★' : ''}${i + 1}|${it.b}${it.l && it.l !== 'Основная' ? ' ' + it.l : ''} — ${it.n}${it.a ? ' (' + it.a + ')' : ''}|` +
     `${STRENGTH_NAME[effStrength(it, cfg.settings.strong_words)] || '?'}|${it.c >= 3 ? `${it.r} (${it.c} оц.)` : '-'}|${it.t.join(', ')}${it.g.length ? ' [' + it.g.join(', ') + ']' : ''}` +
-    `${(it.q || []).length ? ' {' + it.q.join(', ') + '}' : ''}`);
+    `${(it.q || []).length ? ' {' + it.q.join(', ') + '}' : ''}` +
+    `${Array.isArray(it.w) && it.w.length ? '|' + (bigOnly(it) ? 'только ' : '') + [...new Set(it.w)].sort((a, b) => a - b).join('/') + ' г' : ''}`);
   const want = { light: 'лёгкая', medium: 'средняя', strong: 'крепкая' }[session.prefs.strength] || 'любая';
   const user =
     'Запрос клиента: ' + session.text + '\n' +
@@ -1484,6 +1498,14 @@ export const SWEAR_RE = new RegExp('(?<![а-яa-z])(?:' + [
   '(?:blya[a-z]*|suka|pizd[a-z]*|na?hu[iy][a-z]*|ebat[a-z]*|fuck[a-z]*|bitch[a-z]*)(?![a-z])',
 ].join('|') + ')', 'i');
 const ASKED_STOP = /^(безаром\S{0,4}|аромк\S{0,3}|аромн\S{0,3}|ароматизирован\S{0,4}|аромат\S{0,3}|no|aroma|noaroma|микс\S{0,3}|mix(es)?|табак\S{0,3}|кальян\S{0,3}|вкус\S{0,3}|чаш\S{0,3}|забив\S{0,3}|собер\S{0,3}|сдела\S{0,3}|хочу|хочется|дай(те)?|нужн\S{0,2}|что|для|или|без|чтобы|какой|какие|есть|можно|пожалуйста|крепк\S{0,3}|легк\S{0,3}|лёгк\S{0,3}|средн\S{0,3})$/i;
+// Известные кальянные бренды. «Люблю Дарксайд, Мастхев» — это про бренды, а не про табак Deus «Darkside»:
+// слово-бренд считается названием табака, только если рядом назван и бренд самого табака («дарксайд от деус»).
+const KNOWN_BRANDS = ['Darkside', 'Дарксайд', 'Musthave', 'Must Have', 'Мастхев', 'Мастхэв', 'Snobless', 'Сноблесс', 'Black Burn', 'Блэк Бёрн', 'Burn', 'Бёрн', 'Element', 'Элемент',
+  'Sebero', 'Себеро', 'Tangiers', 'Танжирс', 'Танж', 'Fumari', 'Фумари', 'Adalya', 'Адалия', 'Al Fakher', 'Альфакер', 'Аль Факер', 'Daily Hookah', 'Дейли Хука', 'Duft', 'Дафт',
+  'Наш', 'Догма', 'Dogma', 'Trofimoff', 'Трофимов', 'Троф', 'Bonche', 'Бонче', 'Chabacco', 'Чабакко', 'Jent', 'Джент', 'Starline', 'Старлайн', 'Overdose', 'Овердоз',
+  'Palitra', 'Палитра', 'Северный', 'Сарма', 'Sarma', 'База', 'Banger', 'Бэнгер', 'Brusko', 'Бруско', 'Afzal', 'Афзал', 'Serbetli', 'Щербетли', 'MattPear', 'Мэтпир',
+  'Nakhla', 'Нахла', 'Starbuzz', 'Старбаз', 'Joy', 'Джой', 'Khan Burley', 'Muassel', 'Муассель', 'Endorphin', 'Эндорфин', 'Smoke Angels', 'Zomo', 'Зомо', 'World Tobacco Original', 'WTO'];
+
 export function askedKeys(candidates, prefs, text = '') {
   // Берём только то, что клиент действительно написал сам: название должно встречаться в его сообщении
   // (с опечатками и транслитом). Иначе ИИ на шаге разбора может «додумать» табаки — и мы заставим ставить их везде.
@@ -1494,18 +1516,27 @@ export function askedKeys(candidates, prefs, text = '') {
   const grams = [...w, ...w.map(bare).filter((x) => x.length >= 4), ...w.slice(0, -1).map((x, i) => x + ' ' + w[i + 1])];
   // Название должно быть в тексте ЦЕЛИКОМ. Одного общего слова мало: «потный вайб» — это не табак «Заельцовский вайб»,
   // а «с мятой» — не «Марокканская мята». Иначе бот ставит такой табак во все миксы или объявляет, что его нет в наличии.
-  const inText = (name) => {
+  const found = (name, gr) => {
     if (!name) return false;
-    if (grams.some((g) => sameName(g, name))) return true;
+    if (gr.some((g) => sameName(g, name))) return true;
     const nw = words(name).filter((x) => x.length >= 2);
-    return nw.length > 1 && nw.every((x) => grams.some((g) => sameName(g, x)));
+    return nw.length > 1 && nw.every((x) => gr.some((g) => sameName(g, x)));
   };
-  const flavors = ((prefs && prefs.flavors) || []).filter(inText);
+  // Слова сообщения, которые являются брендами: известные, наши (из справочника) и те, что разбор отметил как бренды.
+  const brandNames = [...KNOWN_BRANDS, ...new Set(candidates.map((it) => it.b)), ...((prefs && prefs.brands) || []), ...((prefs && prefs.other_brands) || [])].filter(Boolean);
+  const isBrand = (g) => brandNames.some((b) => sameName(g, b));
+  const plainGrams = grams.filter((g) => !isBrand(g));
+  const brandInText = (it) => !!it && words(it.b).some((bw) => bw.length >= 3 && grams.some((g) => sameName(g, bw)));
+  // Название табака совпало только со словом-брендом («дарксайд») — засчитываем, лишь если назван и бренд этого табака.
+  const inText = (name, it) => found(name, plainGrams) || (found(name, grams) && brandInText(it));
+  const flavorOk = (f, it) => found(f, plainGrams) || (found(f, grams) && brandInText(it));
   // «Малина», «мята», «печенье», «манго» — это вкусы, а не названия табаков, даже если у какого-то бренда табак так и называется
   // (Satyr «Raspberries» = «Малина»). Вкус узнаём по тегам справочника. Иначе бот объявляет «нет в наличии: Satyr Mint» на слово «мята».
   const tags = new Set(candidates.flatMap((it) => [...(it.t || []), ...(it.g || [])]).map((x) => squash(x)));
   const generic = (it) => tags.has(squash(it.n)) || (!!it.a && tags.has(squash(it.a)));
-  const hits = candidates.filter((it) => !generic(it) && (inText(it.n) || inText(it.a) || flavors.some((f) => sameName(f, it.n) || (it.a && sameName(f, it.a)))));
+  const flavors = (prefs && prefs.flavors) || [];
+  const hits = candidates.filter((it) => !generic(it) && (inText(it.n, it) || inText(it.a, it) ||
+    flavors.some((f) => flavorOk(f, it) && (sameName(f, it.n) || (it.a && sameName(f, it.a))))));
   // Больше двух обязательных табаков в каждом миксе — уже не микс: оставляем два самых рейтинговых.
   // Один и тот же вкус в разных линейках («Cookie» Medium и «Cookie» Strong) — это один названный табак, а не два:
   // иначе бот ставит в каждый микс оба печенья сразу.
