@@ -181,15 +181,15 @@ export const DEFAULT_INSTRUCTION = [
   'Одна квадратная картинка на все три микса, премиальная рекламная фуд-съёмка сверху. Светлый почти белый фон с лёгкой серой геометрией: тонкие круги, треугольники, плюсики, пунктир, штриховка.',
   'Композиция занимает весь квадрат, без больших пустых мест. Сверху по центру оставь небольшое пустое место под логотип (чуть меньше трети ширины) — его добавят отдельно: ничего там не рисуй и не пиши, никаких рамок и плашек, просто тот же фон. Верхние углы заполни ингредиентами так же плотно, как нижние, вплотную к этому месту.',
   'В середине кадра в один ряд три крупных круга одинакового размера — микс 1, 2, 3 слева направо. Каждый круг — густые глянцевые соусы цвета вкусов микса, перетекающие друг в друга как инь-ян, с капелькой снизу.',
-  'Рядом с каждым соусом, снаружи круга, — короткая подпись вкуса: «печенье», «карамель», «лимон». Мелко, аккуратно, тёмно-серым. Без линий, стрелок и выносок — и так понятно, к чему подпись.',
-  'Под каждым кругом — название этого микса заглавными жирными чёрными буквами. Цифр и номеров нет.',
+  'Рядом с каждым соусом, снаружи круга, — короткая подпись вкуса: «печенье», «карамель», «лимон». Строчными буквами, будто от руки маркером, тёплым тёмно-коричневым, с лёгким наклоном. Без линий, стрелок и выносок — и так понятно, к чему подпись.',
+  'Под каждым кругом — название этого микса заглавными буквами: мягкий округлый жирный шрифт, тёмно-графитовый. Цифр и номеров нет.',
   'По краям и в нижних углах кадра свежие ингредиенты миксов, частично обрезанные краем. Сочные цвета, мягкие тени. Без брендов и процентов. Без людей, рук, кальянов, сигарет и дыма.',
   'КАРТИНКА: ОБРАЗЫ',
   'Одна квадратная картинка на все три микса, премиальная рекламная фуд-съёмка сверху. Светлый почти белый фон с лёгкой серой геометрией: тонкие круги, треугольники, плюсики, пунктир, штриховка.',
   'Композиция занимает весь квадрат, без больших пустых мест. Сверху по центру оставь небольшое пустое место под логотип (чуть меньше трети ширины) — его добавят отдельно: ничего там не рисуй и не пиши, никаких рамок и плашек, просто тот же фон. Верхние углы заполни ингредиентами так же плотно, как нижние, вплотную к этому месту.',
   'В середине кадра в один ряд три крупных изображения одинакового размера — микс 1, 2, 3 слева направо. Каждое изображение — это сам образ микса из его названия, а не абстрактный круг: если микс «Клубничный пломбир» — шарик пломбира с клубникой, если «Виски сауэр» — бокал коктейля с пенкой и лимоном, если «Брауни» — кусок брауни. Аппетитно, сочно, с глянцем, в цветах вкусов этого микса. Все три разные.',
-  'Рядом с каждым изображением 2–3 коротких подписи вкусов из состава микса: «клубника», «сливки», «лёд». Мелко, аккуратно, тёмно-серым, без линий и стрелок.',
-  'Под каждым изображением — название этого микса заглавными жирными чёрными буквами. Цифр и номеров нет.',
+  'Рядом с каждым изображением 2–3 коротких подписи вкусов из состава микса: «клубника», «сливки», «лёд». Строчными буквами, будто от руки маркером, тёплым тёмно-коричневым, с лёгким наклоном, без линий и стрелок.',
+  'Под каждым изображением — название этого микса заглавными буквами: мягкий округлый жирный шрифт, тёмно-графитовый. Цифр и номеров нет.',
   'По краям и в нижних углах кадра свежие ингредиенты миксов, частично обрезанные краем. Сочные цвета, мягкие тени. Без брендов и процентов. Без людей, рук, кальянов, сигарет и дыма.',
   // Этот раздел идёт не миксологу, а на первый шаг — разбор сообщения клиента. Бот находит его по названию.
   'РАЗБОР ЗАПРОСА',
@@ -851,17 +851,24 @@ async function onWebhook(request, env, ctx) {
   // Telegram повторяет доставку, если мы долго думаем, — не обрабатываем дважды.
   const seenKey = 'upd:' + update.update_id;
   if (await env.KV.get(seenKey)) return new Response('ok');
-  await env.KV.put(seenKey, '1', { expirationTtl: 600 });
+  // Отметка не записалась (например, кончился дневной лимит записей KV) — это не повод молчать: отвечаем клиенту всё равно.
+  await env.KV.put(seenKey, '1', { expirationTtl: 600 }).catch((e) => console.log('upd mark', e.message));
 
-  try {
-    if (update.callback_query) await onCallback(env, update.callback_query, ctx);
-    else if (update.message && update.message.text) await onText(env, update.message, ctx);
-    else if (update.message) await send(env, update.message.chat.id, (await txt(env, await getLang(env, update.message.chat.id))).notText);
-  } catch (e) {
-    console.log('handler', e && e.stack || e);
-    const chat = (update.message || (update.callback_query && update.callback_query.message) || {}).chat;
-    if (chat) await send(env, chat.id, (await txt(env, await getLang(env, chat.id))).error);
-  }
+  const work = (async () => {
+    try {
+      if (update.callback_query) await onCallback(env, update.callback_query, ctx);
+      else if (update.message && update.message.text) await onText(env, update.message, ctx);
+      else if (update.message) await send(env, update.message.chat.id, (await txt(env, await getLang(env, update.message.chat.id))).notText);
+    } catch (e) {
+      console.log('handler', e && e.stack || e);
+      const chat = (update.message || (update.callback_query && update.callback_query.message) || {}).chat;
+      if (chat) await send(env, chat.id, (await txt(env, await getLang(env, chat.id))).error).catch(() => {});
+    }
+  })();
+  // Telegram ждёт ответа не вечно. Если он повесил трубку, Cloudflare обрывает работу на полуслове —
+  // клиент остаётся с «шуршу пакетиками». waitUntil даёт ещё 30 секунд, чтобы дослать ответ.
+  if (ctx && ctx.waitUntil) ctx.waitUntil(work);
+  await work;
   return new Response('ok');
 }
 
@@ -1006,6 +1013,7 @@ async function onText(env, msg, ctx) {
     if (session.askId) await tg(env, 'deleteMessage', { chat_id: chat, message_id: session.askId }).catch(() => {});
   }
   await action(env, chat, 'typing');
+  const t0 = Date.now();
   // Продолжение разговора: «то же самое, только лёгкое», «а без мяты?». Показываем разбору прошлый запрос —
   // он сам решает, продолжение это или новая тема. Кнопка «Новый запрос» прошлый запрос стирает.
   // Прошлый запрос подключаем, только если новое сообщение само похоже на продолжение («то же, но легче», «а без мяты?»).
@@ -1030,11 +1038,11 @@ async function onText(env, msg, ctx) {
     }
   }
   if (prefs.strength === 'unknown') prefs.strength = 'any';
-  await makeMixes(env, chat, { text: request, prefs, ...carry }, false, lang, note);
+  await makeMixes(env, chat, { text: request, prefs, ...carry }, false, lang, note, t0);
 }
 
 /** /config — коротко, что сейчас действует. */
-const CODE_VERSION = '12.20 · 31 (бренд в сообщении клиента — не название табака; маленькие пачки; фраза про крепость)';
+const CODE_VERSION = '12.23 · 34 (платный ИИ ждём сколько нужно; картинка и текст всегда вместе)';
 export function configSummary(cfg, env = {}, stock = null) {
   const at = cfg._at ? new Date(cfg._at).toLocaleString('ru-RU', { timeZone: 'Europe/Moscow', day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) + ' МСК' : 'ещё не загружалась — работают значения из кода';
   const s = cfg.settings;
@@ -1151,6 +1159,28 @@ export function orderButtons(mixes, t, contact) {
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 /** Сообщение-«загрузка»: каждые ~2,5 с меняет фразу, пока бот работает. stop() убирает его. */
+const PROGRESS_EDITS = 14;       // смен фразы за один ответ (≈ 40 секунд), дальше остаётся последняя
+// Потолки ожидания — только страховка от вечного зависания. Медленный ответ платного ИИ — не повод переходить на бесплатный:
+// ждём столько, сколько нужно. Бесплатная модель подключается, только когда платная недоступна (ошибка, кончился баланс).
+const LLM_TIMEOUT = 90000;       // сборка миксов
+const LLM_TIMEOUT_FAST = 40000;  // разбор сообщения
+const IMAGE_TIMEOUT = 90000;     // картинка
+const b64ToBytes = (b64) => {
+  if (typeof Uint8Array.fromBase64 === 'function') return Uint8Array.fromBase64(b64);
+  const bin = atob(b64), out = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i); // в разы меньше процессорного времени, чем Uint8Array.from с функцией
+  return out;
+};
+/** fetch с пределом ожидания и понятной ошибкой: «не ответил за 45 с». */
+async function fetchTimed(url, opts, ms, who) {
+  try { return await fetch(url, { ...opts, signal: AbortSignal.timeout(ms) }); } catch (e) {
+    if (e && (e.name === 'TimeoutError' || e.name === 'AbortError' || /timeout|aborted/i.test(e.message || ''))) {
+      throw Object.assign(new Error(`${who}: не ответил за ${Math.round(ms / 1000)} с`), { slow: true });
+    }
+    throw e;
+  }
+}
+
 async function startProgress(env, chat, first, phrases, note = '') {
   const tail = note ? '\n<i>' + esc(note) + '</i>' : '';
   const j = await send(env, chat, first + tail);
@@ -1158,8 +1188,10 @@ async function startProgress(env, chat, first, phrases, note = '') {
   let done = false;
   if (id && phrases.length) {
     (async () => {
-      for (let i = 0; !done && i < 60; i++) {
-        await sleep(2500);
+      // Каждая смена фразы — внешний запрос, а их у бесплатного Cloudflare 50 на одно сообщение клиента.
+      // Раньше при долгом ответе фразы съедали весь лимит, и на сам ответ запросов не оставалось.
+      for (let i = 0; !done && i < PROGRESS_EDITS; i++) {
+        await sleep(3000);
         if (done) break;
         await tg(env, 'editMessageText', { chat_id: chat, message_id: id, text: esc(phrases[i % phrases.length]) + tail, parse_mode: 'HTML' }).catch(() => {});
       }
@@ -1168,7 +1200,8 @@ async function startProgress(env, chat, first, phrases, note = '') {
   return { stop: async (remove = true) => { done = true; if (id && remove) await tg(env, 'deleteMessage', { chat_id: chat, message_id: id }).catch(() => {}); } };
 }
 
-async function makeMixes(env, chat, session, more = false, lang = 'ru', note = '') {
+async function makeMixes(env, chat, session, more = false, lang = 'ru', note = '', t0 = Date.now()) {
+  const tm = { start: Date.now(), parse: Date.now() - t0 };
   const cfg = await loadConfig(env);
   env = applyBrains(env, cfg);
   const t = tx(cfg, lang);
@@ -1190,7 +1223,10 @@ async function makeMixes(env, chat, session, more = false, lang = 'ru', note = '
     const loose = (stock && stock.unmatched) || [];
     const sameInStock = (x) => catalog.some((c) => c.b === x.b && similarName(c.n, x.n)) ||
       loose.some((u) => u.brand === x.b && (similarName(u.flavor, x.n) || (x.a && similarName(u.flavor, x.a))));
-    session.missing = gone.filter((x) => hit.has(x.k) && !sameInStock(x)).slice(0, 2).map((x) => ({ name: `${x.b} ${x.n}`, t: x.t, g: x.g }));
+    // Двойная проверка, чтобы не объявлять «нет в наличии» по случайному слову: название есть в тексте клиента (hit)
+    // И разбор запроса сам назвал этот табак (flavors). Сомневаемся — молча подбираем из того, что есть.
+    const named = (x) => (session.prefs.flavors || []).some((f) => sameName(f, x.n) || (!!x.a && sameName(f, x.a)));
+    session.missing = gone.filter((x) => hit.has(x.k) && named(x) && !sameInStock(x)).slice(0, 2).map((x) => ({ name: `${x.b} ${x.n}`, t: x.t, g: x.g }));
     if (session.missing.length) {
       session.prefs = { ...session.prefs,
         like: [...new Set([...(session.prefs.like || []), ...session.missing.flatMap((m) => m.t)])],
@@ -1200,8 +1236,10 @@ async function makeMixes(env, chat, session, more = false, lang = 'ru', note = '
   const candidates = pickCandidates(catalog, session.prefs, session.used || [], more, cfg);
   if (candidates.length < 4) { await progress.stop(false); return send(env, chat, t.tooFew, resultKeyboard(t)); }
 
+  const tc = Date.now();
   let result = await composeMixes(env, session, candidates, lang, cfg);
   if (!result.length) result = await composeMixes(env, session, candidates, lang, cfg); // одна повторная попытка
+  tm.compose = Date.now() - tc;
   if (!result.length) { await progress.stop(false); return send(env, chat, t.failed, resultKeyboard(t)); }
 
   session.stage = 'done';
@@ -1219,20 +1257,32 @@ async function makeMixes(env, chat, session, more = false, lang = 'ru', note = '
   const text = gone + result.map((m, i) => renderMix(m, i, t, result.length, bowl)).join('\n\n') +
     '\n\n' + (orders.length ? t.orderHint : t.footer + (shop ? ' ' + shop : ''));
   const sendMixes = () => send(env, chat, text, resultKeyboard(t, orders));
+  const ti = Date.now();
   if (cfg.settings.images && cfg.settings.image_first) {
-    // Вместе: «загрузка» крутится, пока рисуется картинка, потом сразу картинка и текст.
+    // Вместе: «загрузка» крутится, пока рисуется картинка, потом сразу картинка и текст. Текст без картинки вперёд не уходит.
     const photo = await coverImage(env, result, cfg);
     await progress.stop();
     if (photo) await sendPhoto(env, chat, photo, '');
     await sendMixes();
+    tm.text = Date.now() - t0;
   } else {
     await progress.stop();
     await sendMixes();
+    tm.text = Date.now() - t0;
     if (cfg.settings.images) {
       await action(env, chat, 'upload_photo');
       const photo = await coverImage(env, result, cfg);
       if (photo) await sendPhoto(env, chat, photo, '');
     }
+  }
+  tm.image = Date.now() - ti;
+  const sec = (ms) => Math.round((ms || 0) / 100) / 10;
+  const total = Date.now() - t0;
+  console.log(`timing parse=${sec(tm.parse)} compose=${sec(tm.compose)} image=${sec(tm.image)} text_at=${sec(tm.text)} total=${sec(total)}`);
+  // Клиент ждал миксы дольше 75 секунд — сообщаем админам, на каком шаге (не чаще раза в 10 минут).
+  if (tm.text > 75000) {
+    await reportProblem(env, 'slow', `🐢 Клиент ждал миксы ${sec(tm.text)} с: разбор запроса ${sec(tm.parse)} с, сборка миксов ${sec(tm.compose)} с, ` +
+      `картинка ${sec(tm.image)} с (весь ответ ${sec(total)} с).`);
   }
 }
 
@@ -1249,15 +1299,18 @@ async function coverImage(env, mixes, cfg) {
   // Наложение выключено или временно не работает, а в инструкции логотипа уже нет — просим модель нарисовать надпись, как раньше.
   else if (!/sigma/i.test(own)) own += ' ' + IMAGE_TEMPLATE.logo + '.';
   const prompt = noLogo(good ? own + ' ' + (labels ? IMAGE_LABELS[cfg.settings.image_style] || IMAGE_LABELS['круги'] : IMAGE_SAFETY) : imagePrompt(mixes, !!logo));
-  let lastErr = '';
-  const attempt = (e2) => makeImage(e2, prompt).catch((e) => (console.log('image', e.message), lastErr = e.message, null));
+  let lastErr = '', slow = false;
+  const attempt = (e2) => makeImage(e2, prompt).catch((e) => (console.log('image', e.message), lastErr = e.message, slow = !!e.slow, null));
+  const t0 = Date.now();
   let photo = await attempt(env);
-  if (!photo) photo = await attempt(env);
+  // Вторая попытка — только если первая отказала быстро. Если основная модель молчала десятки секунд, ждать её ещё столько же
+  // незачем: сразу рисуем запасную.
+  if (!photo && Date.now() - t0 < 15000) photo = await attempt(env);
   if (!photo && lastErr) {
     await reportProblem(env, 'image', `⚠️ Картинка не получилась (${env.IMAGE_PROVIDER || 'cloudflare'} · ${env.IMAGE_MODEL || 'flux'}):\n${lastErr}` +
-      (env.IMAGE_PROVIDER === 'openai' ? '\nРисую запасную на Cloudflare.' : ''));
+      (slow ? '\nМодель не успела — бесплатную запасную не рисую, миксы ушли без картинки.' : env.IMAGE_PROVIDER === 'openai' ? '\nРисую запасную на Cloudflare.' : ''));
   }
-  if (!photo) {
+  if (!photo && !slow) {
     // Запасной вариант — бесплатно на Cloudflare: FLUX.2, если основная — OpenAI; иначе FLUX.1 (проще).
     const fallback = env.IMAGE_PROVIDER === 'openai' ? '@cf/black-forest-labs/flux-2-klein-4b'
       : (env.IMAGE_MODEL || '').includes('flux-1') ? null : '@cf/black-forest-labs/flux-1-schnell';
@@ -1332,7 +1385,7 @@ async function extractPrefs(env, text, prev = '') {
   const catalog = await loadCatalog(env);
   const system = parsePrompt(cfg, catalog, !!prev);
   // Разбор — простая задача: можно отдать быстрой дешёвой модели (LLM_MODEL_FAST), сборку — умной (LLM_MODEL).
-  const fastEnv = env.LLM_MODEL_FAST ? { ...env, LLM_MODEL: env.LLM_MODEL_FAST, LLM_EFFORT: env.OPENAI_EFFORT_FAST || 'none' } : env;
+  const fastEnv = { ...(env.LLM_MODEL_FAST ? { ...env, LLM_MODEL: env.LLM_MODEL_FAST, LLM_EFFORT: env.OPENAI_EFFORT_FAST || 'none' } : env), LLM_TIMEOUT_MS: LLM_TIMEOUT_FAST };
   const input = prev ? 'ПРЕДЫДУЩИЙ ЗАПРОС КЛИЕНТА (на него уже ответили):\n' + prev + '\n\nНОВОЕ СООБЩЕНИЕ КЛИЕНТА:\n' + text : text;
   const out = await llmJson(fastEnv, system, input, 400);
   const arr = (v) => (Array.isArray(v) ? v.filter((x) => typeof x === 'string' && x.trim()).map((x) => x.trim()).slice(0, 12) : []);
@@ -1447,7 +1500,7 @@ export function composePrompt(cfg, lang = 'ru') {
       ? (style === 'образы'
         ? '  Стиль «образы»: три РАЗНЫХ предмета — каждый изображает сам образ своего микса из названия (десерт, напиток, блюдо), никаких абстрактных кругов и одинаковых форм. '
         : '  Стиль «круги»: три одинаковых по размеру круга из глянцевых соусов; назови точный цвет каждого соуса каждого круга. Никаких других предметов вместо кругов. ') +
-        'Текст на картинке — на ' + t.llmLang + ' языке: подписи вкусов по 1–2 слова («печенье», «карамель», «лимон») рядом с тем, что они называют, БЕЗ линий и стрелок; под каждым миксом его название заглавными буквами, без цифр и номеров. ' +
+        'Текст на картинке — на ' + t.llmLang + ' языке: подписи вкусов по 1–2 слова («печенье», «карамель», «лимон») рядом с тем, что они называют, БЕЗ линий и стрелок; под каждым миксом его название заглавными буквами, без цифр и номеров. Шрифты и цвет текста не описывай — их задаёт бот. ' +
         'Каждую подпись и каждое название дай в задании дословно в кавычках и укажи, к какому миксу и к какой его части они относятся. Бренды и проценты не пиши.\n'
       : '  На картинке никакого текста, кроме логотипа, даже если в инструкции сказано иначе: ни подписей, ни названий, ни цифр.\n') +
     'Верни ТОЛЬКО JSON: {"mixes":[{"title":"","parts":[{"n":1,"p":50,"look":""}],"text":"","strength":3,"garnish":""}],"image":""}';
@@ -1676,11 +1729,11 @@ async function llm(env, system, user, maxTokens, json = false) {
     return typeof c === 'string' ? c : JSON.stringify(c || '');
   }
   if (provider === 'anthropic') {
-    const r = await fetch('https://api.anthropic.com/v1/messages', {
+    const r = await fetchTimed('https://api.anthropic.com/v1/messages', {
       method: 'POST',
       headers: { 'x-api-key': env.LLM_API_KEY, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' },
       body: JSON.stringify({ model, max_tokens: maxTokens, system, messages: [{ role: 'user', content: user }] }),
-    });
+    }, env.LLM_TIMEOUT_MS || LLM_TIMEOUT, 'anthropic');
     const j = await r.json().catch(() => ({}));
     if (!r.ok) throw new Error('anthropic ' + r.status + ' ' + JSON.stringify(j).slice(0, 400));
     const out = (j.content || []).filter((b) => b.type === 'text').map((b) => b.text || '').join('');
@@ -1691,13 +1744,13 @@ async function llm(env, system, user, maxTokens, json = false) {
     // Модели GPT-6 «думают» перед ответом: effort — сколько. low — хороший баланс для миксов, none — для простого разбора.
     // strict — просим у OpenAI ответ строго в виде JSON: тогда он не может прислать «почти JSON» с лишней кавычкой или оборванный.
     const call = async (effort, strict = json) => {
-      const r = await fetch('https://api.openai.com/v1/responses', {
+      const r = await fetchTimed('https://api.openai.com/v1/responses', {
         method: 'POST',
         headers: { authorization: 'Bearer ' + env.LLM_API_KEY, 'content-type': 'application/json' },
         body: JSON.stringify({ model, instructions: system, input: user, reasoning: { effort },
           ...(strict ? { text: { format: { type: 'json_object' } } } : {}),
           max_output_tokens: maxTokens + (effort === 'none' ? 0 : 6000) }),
-      });
+      }, env.LLM_TIMEOUT_MS || LLM_TIMEOUT, 'openai');
       return { r, j: await r.json().catch(() => ({})) };
     };
     const effort = env.LLM_EFFORT || env.OPENAI_EFFORT || 'low';
@@ -1734,9 +1787,10 @@ async function llmJson(env, system, user, maxTokens) {
     text = await llm(env, system, user, maxTokens, true);
   } catch (e) {
     console.log('llm', e.message);
-    const canFallback = (env.LLM_PROVIDER || 'cloudflare') !== 'cloudflare' && env.AI;
-    await reportProblem(env, 'llm', `⚠️ ИИ не ответил (${who}):\n${e.message}` +
-      (canFallback ? '\nПока отвечает бесплатная модель Cloudflare — клиенты миксы получают.' : ''));
+    // Платный ИИ просто долго отвечал — на бесплатный не переходим: бот спросит платный ещё раз.
+    const canFallback = (env.LLM_PROVIDER || 'cloudflare') !== 'cloudflare' && env.AI && !e.slow;
+    await reportProblem(env, e.slow ? 'llmslow' : 'llm', `⚠️ ИИ не ответил (${who}):\n${e.message}` +
+      (e.slow ? '\nНа бесплатную модель не перехожу — спрашиваю платную ещё раз.' : canFallback ? '\nПока отвечает бесплатная модель Cloudflare — клиенты миксы получают.' : ''));
     if (!canFallback) return null;
     try {
       text = await llm({ ...env, LLM_PROVIDER: 'cloudflare', LLM_MODEL: FREE_LLM }, system, user, maxTokens);
@@ -1778,7 +1832,11 @@ export function parseJson(text) {
  * Обычно задание для картинки пишет ИИ по разделу «КАРТИНКА» из инструкции.
  * Этот шаблон — запасной, если ИИ задание не вернул. К любому заданию добавляется IMAGE_SAFETY.
  */
-const IMAGE_TEXT_RULES = 'Text in the image: the "SIGMA MIX" logo; the name of each mix in bold black capitals centered right under it, no digits or numbering; and the short flavor labels given above — small neat dark-grey sans-serif words placed right next to the part they describe, with NO leader lines, arrows or pointers. All text spelled exactly as written, never overlapping the visuals or the logo. No brand names, no percentages, no other text. No people, no hands, no hookah, no cigarettes, no smoke.';
+const IMAGE_TEXT_RULES = 'Text in the image: the "SIGMA MIX" logo; the name of each mix centered right under it, no digits or numbering; and the short flavor labels given above, placed right next to the part they describe, with NO leader lines, arrows or pointers. ' +
+  'Lettering style (this overrides any font description above): friendly and warm, like a hand-made cafe menu, never corporate or heavy. ' +
+  'Flavor labels: casual hand-lettered marker print in warm dark brown, lowercase, clearly readable size, each tilted a few degrees as if written by hand; separate printed letters, not cursive. ' +
+  'Mix names: rounded extra-bold capitals with soft round corners in deep charcoal (not pure black), generous letter spacing. ' +
+  'All text spelled exactly as written, every letter fully legible, never overlapping the visuals or the logo. No brand names, no percentages, no other text. No people, no hands, no hookah, no cigarettes, no smoke.';
 const IMAGE_LABELS = {
   'круги': 'Composition: fill the whole square — exactly three large round sauce swirls of the same size in one row in the vertical center, no big empty areas, especially below the swirls. ' + IMAGE_TEXT_RULES,
   'образы': 'Composition: fill the whole square — exactly three large, clearly different hero objects of similar size in one row in the vertical center, each one depicting its own mix as the dessert, drink or dish from its name; no abstract circles, no repeated shapes, no big empty areas. ' + IMAGE_TEXT_RULES,
@@ -1824,14 +1882,14 @@ export function latin(s) {
 async function makeImage(env, prompt) {
   if ((env.IMAGE_PROVIDER || 'cloudflare') === 'openai') {
     // OpenAI (картинки ChatGPT). Нужен секрет IMAGE_API_KEY — ключ с platform.openai.com.
-    const res = await fetch('https://api.openai.com/v1/images/generations', {
+    const res = await fetchTimed('https://api.openai.com/v1/images/generations', {
       method: 'POST',
       headers: { authorization: 'Bearer ' + env.IMAGE_API_KEY, 'content-type': 'application/json' },
       body: JSON.stringify({ model: env.IMAGE_MODEL || 'gpt-image-2.5-flare', prompt, size: '1024x1024', quality: env.IMAGE_QUALITY || 'medium', n: 1 }),
-    });
+    }, IMAGE_TIMEOUT, 'openai image');
     const j = await res.json().catch(() => ({}));
     if (!res.ok || !j.data || !j.data[0] || !j.data[0].b64_json) throw new Error('openai image ' + res.status + ' ' + JSON.stringify(j).slice(0, 200));
-    return Uint8Array.from(atob(j.data[0].b64_json), (c) => c.charCodeAt(0));
+    return b64ToBytes(j.data[0].b64_json);
   }
   const model = env.IMAGE_MODEL || '@cf/black-forest-labs/flux-2-klein-4b';
   let r;
@@ -1846,8 +1904,8 @@ async function makeImage(env, prompt) {
   } else {
     r = await env.AI.run(model, { prompt, steps: 4 });
   }
-  if (r && typeof r.image === 'string') return Uint8Array.from(atob(r.image), (c) => c.charCodeAt(0));
-  if (r && r.result && typeof r.result.image === 'string') return Uint8Array.from(atob(r.result.image), (c) => c.charCodeAt(0));
+  if (r && typeof r.image === 'string') return b64ToBytes(r.image);
+  if (r && r.result && typeof r.result.image === 'string') return b64ToBytes(r.result.image);
   if (r instanceof ReadableStream) return new Uint8Array(await new Response(r).arrayBuffer());
   if (r instanceof ArrayBuffer) return new Uint8Array(r);
   if (r instanceof Uint8Array) return r;
@@ -2118,6 +2176,7 @@ export async function probeStock(env, cfg, fetcher = fetch, budget = PROBE_BUDGE
   }
   if (!todo.length) return [];
   const state = (await env.KV.get('probe', 'json').catch(() => null)) || {};
+  const stateWas = JSON.stringify(state);
   const now = Date.now(), WEEK = 7 * 24 * 3600 * 1000;
   const vocab = { tags: new Map(), groups: new Map(), taste: new Map() };
   for (const c of Object.values(cats)) for (const x of (c && c.items) || []) {
@@ -2164,7 +2223,8 @@ export async function probeStock(env, cfg, fetcher = fetch, budget = PROBE_BUDGE
     }
     if (!st.done && urls.every((x) => st.tried.includes(x))) Object.assign(st, { done: true, at: now });
   }
-  await env.KV.put('probe', JSON.stringify(state)).catch(() => {});
+  // Пишем, только если что-то изменилось: у бесплатного KV 1000 записей в сутки на всё.
+  if (JSON.stringify(state) !== stateWas) await env.KV.put('probe', JSON.stringify(state)).catch(() => {});
   if (!found.length) return [];
   const map = (await env.KV.get('stockmap', 'json').catch(() => null)) || {};
   const meta = (await env.KV.get('catmeta', 'json').catch(() => null)) || {};
@@ -2415,10 +2475,12 @@ export function sameName(a, b) {
   const x = squash(a), y = squash(b);
   if (x.length < 3 || y.length < 3) return false;
   if (x === y) return true;
-  const sx = skel(a), sy = skel(b);
+  // Сравнение «по согласным» ловит транслит («креме брюле» ≈ «Creme Brulee»), но только для названий близкой длины:
+  // иначе «максимально» совпадает с «Маяки Сахалина» (mksmln ≈ mkshln).
+  const sx = skel(a), sy = skel(b), dl = Math.abs(x.length - y.length);
   if (sx.length >= 4 && sy.length >= 4) {
-    if (sx === sy) return true;
-    if (Math.min(sx.length, sy.length) >= 6 && Math.abs(sx.length - sy.length) <= 1 && editDistance(sx, sy) <= 1) return true;
+    if (sx === sy && dl <= 3) return true;
+    if (dl <= 2 && Math.min(sx.length, sy.length) >= 6 && Math.abs(sx.length - sy.length) <= 1 && editDistance(sx, sy) <= 1) return true;
   }
   if (Math.abs(x.length - y.length) > 2) return false;
   return editDistance(x, y) <= (Math.min(x.length, y.length) >= 10 ? 2 : x.length >= 5 ? 1 : 0);
@@ -2431,10 +2493,12 @@ export function similarName(a, b) {
   const wa = words(a), wb = words(b);
   const [short, long] = wa.length <= wb.length ? [wa, wb] : [wb, wa];
   if (short.length && short.join('').length >= 4 && short.every((w) => long.includes(w))) return true;
-  const sx = skel(a), sy = skel(b);
+  // Сравнение «по согласным» ловит транслит («креме брюле» ≈ «Creme Brulee»), но только для названий близкой длины:
+  // иначе «максимально» совпадает с «Маяки Сахалина» (mksmln ≈ mkshln).
+  const sx = skel(a), sy = skel(b), dl = Math.abs(x.length - y.length);
   if (sx.length >= 4 && sy.length >= 4) {
-    if (sx === sy) return true;
-    if (Math.min(sx.length, sy.length) >= 6 && Math.abs(sx.length - sy.length) <= 1 && editDistance(sx, sy) <= 1) return true;
+    if (sx === sy && dl <= 3) return true;
+    if (dl <= 2 && Math.min(sx.length, sy.length) >= 6 && Math.abs(sx.length - sy.length) <= 1 && editDistance(sx, sy) <= 1) return true;
   }
   if (Math.abs(x.length - y.length) > 2) return false;
   return editDistance(x, y) <= (Math.min(x.length, y.length) >= 10 ? 2 : x.length >= 5 ? 1 : 0);
