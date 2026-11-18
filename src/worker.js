@@ -1021,8 +1021,19 @@ async function onText(env, msg, ctx) {
   const prev = session && session.stage === 'done' && session.text && looksLikeFollowup(text) ? String(session.text) : '';
   const prefs = await extractPrefs(env, request, force ? '' : prev);
   if (!prefs.relevant) return send(env, chat, t.notRelevant);
-  const carry = prev && prefs.followup ? { used: session.used || [], titles: session.titles || [] } : { used: [], titles: [] };
+  let carry = prev && prefs.followup ? { used: session.used || [], titles: session.titles || [] } : { used: [], titles: [] };
   if (prev && prefs.followup) request = (prev + '\n' + text).slice(-1500);
+  // Страховка: в сообщении нет ни одного вкуса, табака или бренда — только крепость («легкая креепость»), а прошлый запрос есть.
+  // Значит, клиент уточняет прошлый запрос: берём его вкусы целиком и меняем только крепость. Иначе бот «забывает» пломбир.
+  const noTaste = !prefs.like.length && !prefs.flavors.length && !prefs.brands.length;
+  const last = session && session.stage === 'done' && session.text && session.prefs ? session : null;
+  if (last && !force && noTaste && prefs.strength !== 'unknown' && !prefs.followup) {
+    const keep = last.prefs;
+    Object.assign(prefs, { like: keep.like || [], avoid: [...new Set([...(keep.avoid || []), ...prefs.avoid])], groups: keep.groups || [],
+      flavors: keep.flavors || [], brands: keep.brands || [], other_brands: keep.other_brands || [], followup: true });
+    request = (String(last.text) + '\n' + text).slice(-1500);
+    carry = { used: last.used || [], titles: last.titles || [] };
+  }
   let note = '';
   if (prefs.strength !== 'unknown') {
     await rememberStrength(env, chat, prefs.strength); // назвал сам — запоминаем
@@ -1042,7 +1053,7 @@ async function onText(env, msg, ctx) {
 }
 
 /** /config — коротко, что сейчас действует. */
-const CODE_VERSION = '12.26 · 37 (соусы на картинке — с натуральной фактурой; ответ ИИ с кавычками чинится сам)';
+const CODE_VERSION = '12.27 · 38 (уточнение крепости не сбрасывает вкусы прошлого запроса)';
 export function configSummary(cfg, env = {}, stock = null) {
   const at = cfg._at ? new Date(cfg._at).toLocaleString('ru-RU', { timeZone: 'Europe/Moscow', day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) + ' МСК' : 'ещё не загружалась — работают значения из кода';
   const s = cfg.settings;
@@ -1375,7 +1386,9 @@ export function looksLikeFollowup(text) {
   if (x.trim().split(' ').length > 14) return false; // длинное сообщение — это уже полноценный новый запрос
   const strong = / (то же|тоже самое|то же самое|такое же|такой же|такие же|так же|также|в том же|то самое|еще|вместо|замени|заменить|убери|убрать|добавь|добавить|поменяй|поменять|другое|другой|другие|другую|иначе|похоже|похожее|похожие|похожий|аналогично|аналогичное|same|more|another|instead|по(легче|крепче|слаще|кислее|свежее|слабее|мягче|ярче|холоднее|проще|интереснее)|легче|крепче|слаще|кислее|свежее|слабее|мягче) /;
   const weakStart = /^ (а|но|только|без|и|с|или|ну а|а если|а можно|давай без|давай с|можно без|можно с) /;
-  return strong.test(x) || weakStart.test(x);
+  // Короткое сообщение про крепость («лёгкая крепость», «сделай средне», «крепко») — это уточнение к прошлому запросу.
+  const aboutStrength = x.trim().split(' ').length <= 5 && / (легк\S*|слаб\S*|средн\S*|крепк\S*|кре+пост\S*|light|medium|strong) /.test(x);
+  return strong.test(x) || weakStart.test(x) || aboutStrength;
 }
 
 /** Шаг 1. ИИ превращает свободный текст в структуру предпочтений. */
