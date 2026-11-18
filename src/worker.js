@@ -635,6 +635,18 @@ export function resetCaches() { cfgCache = { at: 0, cfg: null }; catCache = { at
 const CANDIDATES = 60;
 const HELPERS = 15;
 const HELPER_GROUPS = ['Освежающий', 'Цитрусовый', 'Ягодный'];
+/*
+ * Популярность по htreviews: рейтинг с поправкой на число оценок (4.8 по трём оценкам — ещё не 4.8)
+ * плюс небольшая надбавка за массовость. При одинаковом совпадении по вкусу вперёд выходит табак
+ * рейтинговее и популярнее, но вкус клиента всё равно главнее: совпадение одного тега весит 3.
+ */
+const POP_PRIOR = 3.7, POP_WEIGHT = 10;
+export function popularity(it) {
+  const c = it.c || 0;
+  if (!c || !it.r) return -0.3;                          // нет оценок (в том числе свои карточки) — чуть ниже прочих
+  const adj = (it.r * c + POP_PRIOR * POP_WEIGHT) / (c + POP_WEIGHT);
+  return (adj - POP_PRIOR) * 1.5 + Math.min(Math.log10(c + 1), 2.5) * 0.4;
+}
 const HELPER_TASTES = ['кислый', 'освежающий'];
 
 /* ═════════════════════════ Входные точки ═════════════════════════ */
@@ -679,10 +691,10 @@ async function cronConfig(env) {
   }
   if (r.ok && r.stock && r.stock.rows) {
     const found = await probeStock(env, r.cfg).catch((e) => (console.log('probe', e.message), []));
-    if (found.length) {
-      await syncStock(env, r.stock.rows, r.cfg, true, r.stock.rows.match).catch((e) => console.log('probe resync', e.message));
-      await notifyAdmins(env, probeText(found).slice(0, 3800));
-    }
+    const made = await ownCards(env, r.cfg).catch((e) => (console.log('own', e.message), []));
+    if (found.length || made.length) await syncStock(env, r.stock.rows, r.cfg, true, r.stock.rows.match).catch((e) => console.log('probe resync', e.message));
+    if (found.length) await notifyAdmins(env, probeText(found).slice(0, 3800));
+    if (made.length) await notifyAdmins(env, ownText(made).slice(0, 3800));
   }
   await crawlMissingBrand(env);
 }
@@ -705,17 +717,29 @@ async function crawlingBrand(env, cfg) {
   return slug ? cfg.brands.find((b) => b.on && b.code === slug) || null : null;
 }
 
+/** Бренд, справочник которого старше days дней (самый давний первым), кроме тех, что недавно не скачались. */
+async function staleBrand(env, cfg, days) {
+  const meta = (await env.KV.get('catmeta', 'json').catch(() => null)) || {};
+  const age = (x) => Date.parse((meta[x.code] || {}).updated || 0) || 0;
+  for (const b of cfg.brands.filter((x) => x.on && Date.now() - age(x) > days * 24 * 3600 * 1000).sort((x, y) => age(x) - age(y))) {
+    if (!(await env.KV.get('crawlfail:' + b.code))) return b;
+  }
+  return null;
+}
+
 async function crawlWeekly(env) {
   const cfg = await loadConfig(env);
   let b = await crawlingBrand(env, cfg);
-  if (!b) {
-    const meta = (await env.KV.get('catmeta', 'json').catch(() => null)) || {};
-    const age = (x) => Date.parse((meta[x.code] || {}).updated || 0) || 0;
-    // Обновлялся больше 5 дней назад (или ни разу с тех пор, как появилась докачка) — самый давний первым.
-    b = cfg.brands.filter((x) => x.on && Date.now() - age(x) > 5 * 24 * 3600 * 1000).sort((x, y) => age(x) - age(y))[0];
-  }
+  if (b && (await env.KV.get('crawlfail:' + b.code))) b = null;
+  // Обновлялся больше 5 дней назад (или ни разу с тех пор, как появилась докачка) — самый давний первым.
+  if (!b) b = await staleBrand(env, cfg, 5);
   if (!b) return;
-  const res = await crawlBrand(env, b.code);
+  let res;
+  try { res = await crawlBrand(env, b.code); } catch (e) {
+    // Один упрямый бренд не должен держать очередь: час его не трогаем, берём следующие.
+    await env.KV.put('crawlfail:' + b.code, e.message, { expirationTtl: 3600 });
+    throw e;
+  }
   if (!res.partial) {
     console.log('crawl weekly', b.code, res.before, '→', res.total);
     const text = newsText(b.name, res);
@@ -774,6 +798,19 @@ async function crawlMissingBrand(env) {
       await env.KV.put('crawlfail:' + code, e.message, { expirationTtl: 1800 });
       await recrawlStep(env, code, null, e.message);
       console.log('recrawl', code, e.message);
+    }
+    return;
+  }
+  // Страховка: если понедельничное обновление не прошло (сайт лежал и т.п.), бренд старше 8 дней докачиваем понемногу здесь.
+  const late = (await Promise.all(cfg.brands.filter((x) => x.on).map(async (x) => ((await env.KV.get('cat:' + x.code)) ? null : x)))).some(Boolean)
+    ? null : await staleBrand(env, cfg, 8);
+  if (late) {
+    try {
+      const res = await crawlBrand(env, late.code, fetch, undefined, CRAWL_PAGES_CRON);
+      if (!res.partial) { const text = newsText(late.name, res); if (text) await notifyAdmins(env, text.slice(0, 3800)); }
+    } catch (e) {
+      await env.KV.put('crawlfail:' + late.code, e.message, { expirationTtl: 3600 });
+      console.log('crawl late', late.code, e.message);
     }
     return;
   }
@@ -916,7 +953,10 @@ async function onText(env, msg, ctx) {
         if (left.some((u) => u.tried)) {
           await send(env, chat, `🔎 ${left.length} позиций нет в списках htreviews — ищу их страницы на сайте по прямым ссылкам…`);
           const found = await probeStock(env, cfg, fetch, PROBE_BUDGET_CMD);
-          if (found.length) { await syncStock(env, rows, cfg, true, rows && rows.match); await send(env, chat, esc(probeText(found)).slice(0, 3800)); }
+          const made = await ownCards(env, cfg);
+          if (found.length || made.length) await syncStock(env, rows, cfg, true, rows && rows.match);
+          if (found.length) await send(env, chat, esc(probeText(found)).slice(0, 3800));
+          if (made.length) await send(env, chat, esc(ownText(made)).slice(0, 3800));
         }
       } catch (e) {
         return send(env, chat, '❌ Не получилось прочитать наличие: ' + esc(e.message));
@@ -988,7 +1028,7 @@ async function onText(env, msg, ctx) {
 }
 
 /** /config — коротко, что сейчас действует. */
-const CODE_VERSION = '12.15 · 26 (вкусы, которых нет в списках htreviews, — по прямой ссылке)';
+const CODE_VERSION = '12.17 · 28 (подбор: при равном вкусе — рейтинговее и популярнее по htreviews)';
 export function configSummary(cfg, env = {}, stock = null) {
   const at = cfg._at ? new Date(cfg._at).toLocaleString('ru-RU', { timeZone: 'Europe/Moscow', day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) + ' МСК' : 'ещё не загружалась — работают значения из кода';
   const s = cfg.settings;
@@ -1349,7 +1389,7 @@ export function pickCandidates(catalog, prefs, used = [], more = false, cfg = DE
     if (flavors.some((f) => similarName(f, it.n) || (it.a && similarName(f, it.a)))) score += 4;
     if (brands.some((b) => similarName(b, it.b))) score += 1.5;
     const base = score;
-    if (it.c >= 5) score += (it.r - 3.5) * 0.8;
+    score += popularity(it);
     if (usedSet.has(it.k)) score -= 3;
     score += Math.random() * jitter;
     scored.push({ it, score, base });
@@ -1377,7 +1417,8 @@ export function composePrompt(cfg, lang = 'ru') {
     (cfg.limits.length ? 'ОБЯЗАТЕЛЬНЫЕ ОГРАНИЧЕНИЯ ОТ КОМАНДЫ — они важнее всего остального:\n' + cfg.limits.map((x) => '- ' + x).join('\n') + '\n\n' : '') +
     // ↓ технические рамки и формат ответа: от них зависит, сможет ли бот разобрать ответ.
     'ТЕХНИЧЕСКИЕ ТРЕБОВАНИЯ:\n' +
-    '- Собери ровно 3 микса ТОЛЬКО из табаков списка. Формат строки списка: номер|табак|крепость по htreviews|рейтинг|вкусы [группы] {характер вкуса: сладкий, кислый, терпкий, освежающий…}. Характер вкуса помогает балансу: сладкое уравновешивай кислым или освежающим.\n' +
+    '- Собери ровно 3 микса ТОЛЬКО из табаков списка. Формат строки списка: номер|табак|крепость по htreviews|рейтинг (число оценок)|вкусы [группы] {характер вкуса: сладкий, кислый, терпкий, освежающий…}. Характер вкуса помогает балансу: сладкое уравновешивай кислым или освежающим.\n' +
+    '- Рейтинг и число оценок — с htreviews. Из табаков с одинаковым вкусом и подходящей крепостью бери тот, у кого рейтинг выше; при близком рейтинге — у кого больше оценок (ему больше доверия). Табаки без рейтинга («-») бери, только если без них не собрать то, что просит клиент.\n' +
     '- Никогда не возвращай пустой список миксов и не проси что-то добавить. Если табака или вкуса, который назвал клиент, в списке нет — подбери самое близкое по вкусу из списка.\n' +
     `- В миксе от ${st.min_tobaccos} до ${st.max_tobaccos} табаков, доли — целые числа, кратные ${st.share_step}, в сумме ровно 100.\n` +
     (st.base_share ? `- В каждом миксе один табак — база: его доля не меньше ${st.base_share}%. Остальные табаки — дополнения к базе: подбирай их под её вкус, чтобы они подчёркивали или оттеняли базу, а не спорили с ней.\n` : '') +
@@ -1403,7 +1444,7 @@ async function composeMixes(env, session, candidates, lang = 'ru', cfg = DEFAULT
   const asked = askedKeys(candidates, session.prefs, session.text);
   const lines = candidates.map((it, i) =>
     `${asked.has(it.k) ? '★' : ''}${i + 1}|${it.b}${it.l && it.l !== 'Основная' ? ' ' + it.l : ''} — ${it.n}${it.a ? ' (' + it.a + ')' : ''}|` +
-    `${STRENGTH_NAME[effStrength(it, cfg.settings.strong_words)] || '?'}|${it.c >= 3 ? it.r : '-'}|${it.t.join(', ')}${it.g.length ? ' [' + it.g.join(', ') + ']' : ''}` +
+    `${STRENGTH_NAME[effStrength(it, cfg.settings.strong_words)] || '?'}|${it.c >= 3 ? `${it.r} (${it.c} оц.)` : '-'}|${it.t.join(', ')}${it.g.length ? ' [' + it.g.join(', ') + ']' : ''}` +
     `${(it.q || []).length ? ' {' + it.q.join(', ') + '}' : ''}`);
   const want = { light: 'лёгкая', medium: 'средняя', strong: 'крепкая' }[session.prefs.strength] || 'любая';
   const user =
@@ -2036,12 +2077,17 @@ export function parseFlavorPage(html, vocab = { tags: new Map(), groups: new Map
 export async function probeStock(env, cfg, fetcher = fetch, budget = PROBE_BUDGET, waits = [3000]) {
   const stock = await env.KV.get('stock', 'json').catch(() => null);
   const todo = ((stock && stock.unmatched) || []).filter((u) => u.tried); // ИИ уже посмотрел и не нашёл
-  if (!todo.length) return [];
-  const state = (await env.KV.get('probe', 'json').catch(() => null)) || {};
-  const now = Date.now(), WEEK = 7 * 24 * 3600 * 1000;
   const brands = cfg.brands.filter((b) => b.on);
   const cats = {};
   for (const b of brands) cats[b.code] = await env.KV.get('cat:' + b.code, 'json').catch(() => null);
+  // Свои карточки тоже раз в неделю ищем на сайте: вдруг вкус там появился.
+  const inStock = new Set(Object.keys((stock && stock.items) || {}));
+  for (const c of Object.values(cats)) for (const it of (c && c.items) || []) {
+    if (it.o && it.src && inStock.has(it.k) && !todo.some((u) => u.id === it.src.id)) todo.push({ ...it.src, own: it.k });
+  }
+  if (!todo.length) return [];
+  const state = (await env.KV.get('probe', 'json').catch(() => null)) || {};
+  const now = Date.now(), WEEK = 7 * 24 * 3600 * 1000;
   const vocab = { tags: new Map(), groups: new Map(), taste: new Map() };
   for (const c of Object.values(cats)) for (const x of (c && c.items) || []) {
     for (const t of x.t || []) vocab.tags.set(t.toLowerCase(), t);
@@ -2060,7 +2106,7 @@ export async function probeStock(env, cfg, fetcher = fetch, budget = PROBE_BUDGE
     const cat = cats[b.code];
     // Линейки бренда: из адресов вкусов (там бывают и старые: spectrum-main) и со страницы бренда.
     const segs = new Map();
-    for (const it of cat.items) { const p = it.k.split('/'); if (p.length === 3 && !segs.has(p[1])) segs.set(p[1], it.l); }
+    for (const it of cat.items) { const p = it.k.split('/'); if (p.length === 3 && !it.o && !segs.has(p[1])) segs.set(p[1], it.l); }
     for (const l of cat.lines || []) { const sg = l.split('/')[1]; if (sg && !segs.has(sg)) segs.set(sg, ''); }
     const want = squash(u.line);
     const keyWords = words(u.line).filter((w) => w.length > 2 && !/^(line|линейка)$/i.test(w)).map(squash);
@@ -2109,6 +2155,96 @@ export async function probeStock(env, cfg, fetcher = fetch, budget = PROBE_BUDGE
   await env.KV.put('catmeta', JSON.stringify(meta)).catch(() => {});
   catCache = { at: 0, sig: '', items: [] };
   return found;
+}
+
+/* ───────────── Свои карточки ─────────────
+ * Последняя ступень для позиций склада, которых нет на htreviews совсем (ни в списках, ни по прямой ссылке):
+ * ИИ один раз составляет карточку по бренду, линейке и названию (если название — отсылка к духам, коктейлю, блюду —
+ * по их известным нотам). Теги — только из словаря справочника, крепость — по линейке. Карточка лежит в catextra:<бренд>,
+ * переживает перекачку и участвует в подборе. Как только вкус появится на htreviews, его настоящая карточка займёт место своей.
+ * Цепочка для новой позиции склада целиком автоматическая: название → ИИ → прямая ссылка → своя карточка.
+ */
+const OWN_BATCH = 25;
+const slugPart = (x) => latin(String(x || '')).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'x';
+
+export async function ownCards(env, cfg, llm = null) {
+  const stock = await env.KV.get('stock', 'json').catch(() => null);
+  const state = (await env.KV.get('probe', 'json').catch(() => null)) || {};
+  // Только то, что ИИ не нашёл и прямые ссылки уже все перепробованы.
+  const todo = ((stock && stock.unmatched) || []).filter((u) => u.tried && state[u.id] && state[u.id].done && !state[u.id].key).slice(0, OWN_BATCH);
+  if (!todo.length) return [];
+  const brands = cfg.brands.filter((b) => b.on);
+  const cats = {};
+  for (const b of brands) cats[b.code] = await env.KV.get('cat:' + b.code, 'json').catch(() => null);
+  const all = Object.values(cats).flatMap((c) => (c && c.items) || []).filter((x) => !x.o);
+  const count = (arr) => { const m = new Map(); for (const v of arr) m.set(v, (m.get(v) || 0) + 1); return [...m].sort((a, b) => b[1] - a[1]).map(([v]) => v); };
+  const tags = count(all.flatMap((x) => x.t || [])).slice(0, 300);
+  const groups = count(all.flatMap((x) => x.g || []));
+  const tastes = count(all.flatMap((x) => x.q || []));
+  const byLow = (list) => new Map(list.map((v) => [String(v).toLowerCase(), v]));
+  const T = byLow(tags), G = byLow(groups), Q = byLow(tastes);
+  const jobs = [];
+  for (const u of todo) {
+    const b = brands.find((x) => cats[x.code] && (cats[x.code].items || []).some((it) => it.b === u.brand));
+    if (!b) continue;
+    // Линейка из справочника, похожая по названию (PRIME LINE → Prime Strong), и её обычная крепость.
+    const words2 = words(u.line).filter((w) => w.length > 2 && !/^(line|линейка)$/i.test(w)).map(squash);
+    const same = cats[b.code].items.filter((it) => !it.o && it.l && (squash(it.l) === squash(u.line) || words2.some((w) => squash(it.l).includes(w))) && lineScore(u.line, it.l) > -3);
+    const sv = same.map((it) => it.s).filter(Boolean).sort((x, y) => x - y);
+    jobs.push({ u, code: b.code, line: same.length ? count(same.map((it) => it.l))[0] : u.line, s: sv.length ? sv[Math.floor(sv.length / 2)] : 0 });
+  }
+  if (!jobs.length) return [];
+  const sys = 'Ты составляешь карточки вкусов кальянного табака, которых нет на htreviews. По бренду, линейке и названию определи, какой это вкус. ' +
+    'Если название — отсылка к известным духам (например, Tom Ford Bitter Peach, Serge Lutens), коктейлю, блюду или напитку — опирайся на их известные ноты. ' +
+    '«No Aroma» и подобное — табак без ароматизатора: тег «Табачный», если он есть в списке. ' +
+    'Теги, группы и характер вкуса бери СТРОГО из списков ниже, 1–4 тега. alt — русское название вкуса. desc — одна короткая фраза, что во вкусе. ' +
+    'strength — крепость числом 1–5 (1 лёгкая … 5 крепкая), если не указана в задании. ' +
+    'Верни ТОЛЬКО JSON: {"номер": {"alt": "...", "tags": [...], "groups": [...], "tastes": [...], "strength": 3, "desc": "..."}}.';
+  const user = 'ТЕГИ: ' + tags.join(', ') + '\nГРУППЫ: ' + groups.join(', ') + '\nХАРАКТЕР ВКУСА: ' + tastes.join(', ') +
+    '\n\nВКУСЫ (номер|бренд|линейка|название|крепость линейки):\n' +
+    jobs.map((j, i) => `${i + 1}|${j.u.brand}|${j.line}|${j.u.flavor}|${j.s ? STRENGTH_NAME[j.s] : 'не указана'}`).join('\n');
+  const out = await (llm || ((sy, us) => llmJson(applyBrains(env, cfg), sy, us, 4000)))(sys, user);
+  if (!out) return []; // ИИ не ответил — попробуем при следующей проверке
+  const made = [];
+  jobs.forEach((j, i) => {
+    const o = out[String(i + 1)];
+    if (!o || typeof o !== 'object') return;
+    const pick = (arr, M) => [...new Set((Array.isArray(arr) ? arr : []).map((v) => M.get(String(v).toLowerCase())).filter(Boolean))];
+    const it = {
+      k: `${j.code}/own-${slugPart(j.u.line)}/${slugPart(j.u.flavor)}`,
+      n: String(j.u.flavor).replace(/^\((.*)\)$/, '$1').trim(), a: String(o.alt || '').trim().slice(0, 60), b: j.u.brand, l: j.line,
+      s: j.s || Math.min(5, Math.max(1, Math.round(Number(o.strength) || 3))), r: 0, c: 0,
+      t: pick(o.tags, T).slice(0, 4), g: pick(o.groups, G), q: pick(o.tastes, Q), v: 0, o: 1,
+      desc: String(o.desc || '').trim().slice(0, 200),
+      src: { id: j.u.id, brand: j.u.brand, line: j.u.line, flavor: j.u.flavor, tried: true },
+    };
+    if (it.t.length || it.g.length) made.push({ code: j.code, u: j.u, it });
+  });
+  if (!made.length) return [];
+  const map = (await env.KV.get('stockmap', 'json').catch(() => null)) || {};
+  const meta = (await env.KV.get('catmeta', 'json').catch(() => null)) || {};
+  for (const code of [...new Set(made.map((m) => m.code))]) {
+    const mine = made.filter((m) => m.code === code);
+    const cat = cats[code];
+    cat.items = cat.items.filter((x) => !mine.some((m) => m.it.k === x.k)).concat(mine.map((m) => m.it));
+    cat.total = cat.items.length;
+    await env.KV.put('cat:' + code, JSON.stringify(cat));
+    const extra = (await env.KV.get('catextra:' + code, 'json').catch(() => null)) || { items: [] };
+    extra.items = extra.items.filter((x) => !mine.some((m) => m.it.k === x.k)).concat(mine.map((m) => m.it));
+    await env.KV.put('catextra:' + code, JSON.stringify(extra));
+    meta[code] = { ...(meta[code] || {}), total: cat.items.length, own: new Date().toISOString() };
+  }
+  for (const m of made) map[m.u.id] = m.it.k;
+  await env.KV.put('stockmap', JSON.stringify(map));
+  await env.KV.put('catmeta', JSON.stringify(meta)).catch(() => {});
+  catCache = { at: 0, sig: '', items: [] };
+  return made;
+}
+
+export function ownText(made) {
+  return '🧾 Этих вкусов нет на htreviews — сделал для них свои карточки (ИИ по названию), теперь они в подборе:\n' +
+    made.map((m) => `• ${m.it.b} ${m.it.l} — ${m.it.n}${m.it.a ? ' (' + m.it.a + ')' : ''}: ${[...m.it.t, ...m.it.q].join(', ') || m.it.g.join(', ')}; ${STRENGTH_NAME[m.it.s] || ''}`).join('\n') +
+    '\nНе так — во вкладке «Соответствия» в колонке «Исправить вручную» можно указать другой табак или «нет».';
 }
 
 /** Сообщение админам о найденном по прямой ссылке. */
@@ -2419,6 +2555,7 @@ export function matchStock(positions, catalog, map = {}, manual = {}) {
   for (const it of catalog) { add(it.b, it.n, it); if (it.a) add(it.b, it.a, it); }
   const known = new Set(catalog.map((x) => x.k));
   const extraKeys = new Set(catalog.filter((x) => x.x).map((x) => x.k)); // найдены по прямой ссылке
+  const ownKeys = new Set(catalog.filter((x) => x.o).map((x) => x.k));   // свои карточки (на htreviews вкуса нет)
   const items = {}, unmatched = [];
   let tobaccos = 0;
   const done = new Map(); // одна и та же позиция в разных фасовках ищется один раз
@@ -2429,16 +2566,18 @@ export function matchStock(positions, catalog, map = {}, manual = {}) {
     tobaccos++;
     if (!done.has(e.id)) {
       let key = manual[e.id], who = 'вручную';
-      if (key === undefined) { key = map[e.id]; who = known.has(key) && extraKeys.has(key) ? 'прямая ссылка htreviews' : 'ИИ'; }
+      if (key === undefined) { key = map[e.id]; who = ownKeys.has(key) ? 'своя карточка (ИИ)' : known.has(key) && extraKeys.has(key) ? 'прямая ссылка htreviews' : 'ИИ'; }
       if (key && !known.has(key)) key = undefined; // ответ указывает на табак, которого в справочнике больше нет
       // Своё совпадение по названию проверяем и тогда, когда ИИ раньше ответил «нет»: справочник мог пополниться.
-      if (key === undefined || (key === '' && who === 'ИИ')) {
+      // Своя карточка уступает настоящей, как только вкус появился в справочнике htreviews.
+      if (key === undefined || (key === '' && who === 'ИИ') || ownKeys.has(key)) {
         const hits = [...new Set(e.names.flatMap((v) => index.get(e.brand + '|' + squash(v)) || []))]
+          .filter((it) => !it.o || !ownKeys.has(key))
           .map((it) => ({ it, line: lineScore(e.line, it.l) }))
-          .sort((x, y) => y.line - x.line || (y.it.c || 0) - (x.it.c || 0));
+          .sort((x, y) => (x.it.o ? 1 : 0) - (y.it.o ? 1 : 0) || y.line - x.line || (y.it.c || 0) - (x.it.c || 0));
         // Совпало название, но линейка явно другая (Strong ↔ Medium) — не берём: это другой по крепости табак.
         const k2 = hits.length && hits[0].line > -3 ? hits[0].it.k : undefined;
-        if (k2) { key = k2; who = extraKeys.has(k2) ? 'прямая ссылка htreviews' : 'по названию'; } else if (key === undefined) who = 'по названию';
+        if (k2) { key = k2; who = ownKeys.has(k2) ? 'своя карточка (ИИ)' : extraKeys.has(k2) ? 'прямая ссылка htreviews' : 'по названию'; } else if (key === undefined) who = 'по названию';
       }
       done.set(e.id, key);
       pairs.set(e.id, { pos: `${e.brand} | ${e.line} | ${e.flavor}`, key: key || '', who: key === undefined ? 'ждёт разбора ИИ' : who, w: [] });
