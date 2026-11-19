@@ -1072,7 +1072,7 @@ async function onText(env, msg, ctx) {
 }
 
 /** /config — коротко, что сейчас действует. */
-const CODE_VERSION = '12.33 · 44 (новая карточка подбора: эмодзи, крепость точками, заказ в одно касание, «Покрепче» / «Полегче»)';
+const CODE_VERSION = '12.34 · 45 (картинка и текст снова двумя сообщениями; новая карточка, заказ в одно касание, «Покрепче» / «Полегче»)';
 export function configSummary(cfg, env = {}, stock = null) {
   const at = cfg._at ? new Date(cfg._at).toLocaleString('ru-RU', { timeZone: 'Europe/Moscow', day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) + ' МСК' : 'ещё не загружалась — работают значения из кода';
   const s = cfg.settings;
@@ -1190,7 +1190,7 @@ function strengthKeyboard(t) {
  * Миксы из текста сообщения бота. Кнопка «Заказать» берёт состав прямо из сообщения, под которым она стоит,
  * поэтому работает под любым старым подбором — после «Нового запроса», после «Ещё вариантов», через неделю.
  * Формат блока — тот, что печатает renderMix: название, описание, строки «50% Табак · Бренд Линейка · пачки 30 / 100 г»
- * (в подборах до версии 12.33 — «50% — Табак…», их тоже читаем). У карточки с картинкой текст лежит в подписи.
+ * (в подборах до версии 12.33 — «50% — Табак…», их тоже читаем). В версии 12.33 текст лежал в подписи к картинке — читаем и её.
  */
 export function mixesFromMessage(text) {
   return String(text || '').split(/\n\s*\n/).map((block) => {
@@ -1269,7 +1269,6 @@ export function orderButtons(mixes, t, contact) {
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 /** Сообщение-«загрузка»: каждые ~2,5 с меняет фразу, пока бот работает. stop() убирает его. */
-const CAPTION_MAX = 1000;        // подпись к картинке в Telegram — до 1024 знаков; берём с запасом
 const PROGRESS_EDITS = 14;       // смен фразы за один ответ (≈ 40 секунд), дальше остаётся последняя
 // Потолки ожидания — только страховка от вечного зависания. Медленный ответ платного ИИ — не повод переходить на бесплатный:
 // ждём столько, сколько нужно. Бесплатная модель подключается, только когда платная недоступна (ошибка, кончился баланс).
@@ -1377,15 +1376,12 @@ async function makeMixes(env, chat, session, more = false, lang = 'ru', note = '
   const sendMixes = () => send(env, chat, text, kb);
   const ti = Date.now();
   if (cfg.settings.images && cfg.settings.image_first) {
-    // Вместе: «загрузка» крутится, пока рисуется картинка. Потом одна карточка: картинка, под ней миксы и кнопки.
-    // У подписи к картинке в Telegram предел 1024 знака: не влезло — картинка и текст двумя сообщениями подряд, как раньше.
+    // Вместе: «загрузка» крутится, пока рисуется картинка, потом сразу картинка и следом текст с кнопками.
+    // Двумя сообщениями, а не подписью к картинке: подпись узкая (по ширине картинки) — состав читать неудобно. Текст без картинки вперёд не уходит.
     const photo = await coverImage(env, result, cfg);
     await progress.stop();
-    if (photo && stripTags(text).length <= CAPTION_MAX) await sendPhoto(env, chat, photo, text, kb);
-    else {
-      if (photo) await sendPhoto(env, chat, photo, '');
-      await sendMixes();
-    }
+    if (photo) await sendPhoto(env, chat, photo, '');
+    await sendMixes();
     tm.text = Date.now() - t0;
   } else {
     await progress.stop();
