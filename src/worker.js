@@ -545,7 +545,7 @@ export async function syncConfig(env, fetcher = fetch, withStock = false) {
       .some((k) => JSON.stringify((old.texts || {})[k]) !== JSON.stringify(cfg.texts[k]));
     if (tChanged || !prev) await applyProfile(env, cfg);
   }
-  const stock = withStock ? await syncStock(env, stockRows, cfg, false, stockRows && stockRows.match).catch((e) => (console.log('stock', e.message), { state: 'error', error: e.message })) : null;
+  const stock = withStock ? await syncStock(env, stockRows, cfg, false).catch((e) => (console.log('stock', e.message), { state: 'error', error: e.message })) : null;
   if (stock) stock.rows = stockRows;
   return { ok: true, changed: !prev || sections.length > 0, sections: prev ? sections : Object.keys(SECTION_NAMES), newBrands, warnings, cfg, stock };
 }
@@ -720,7 +720,7 @@ async function cronConfig(env) {
   if (r.ok && r.stock && r.stock.rows) {
     const found = await probeStock(env, r.cfg).catch((e) => (console.log('probe', e.message), []));
     const made = await ownCards(env, r.cfg).catch((e) => (console.log('own', e.message), []));
-    if (found.length || made.length) await syncStock(env, r.stock.rows, r.cfg, true, r.stock.rows.match).catch((e) => console.log('probe resync', e.message));
+    if (found.length || made.length) await syncStock(env, r.stock.rows, r.cfg, true).catch((e) => console.log('probe resync', e.message));
     if (found.length) await notifyAdmins(env, probeText(found).slice(0, 3800));
     if (made.length) await notifyAdmins(env, ownText(made).slice(0, 3800));
   }
@@ -980,7 +980,9 @@ async function onText(env, msg, ctx) {
       }
       try {
         const rows = await fetchStockRows(env);
-        const st = await syncStock(env, rows, cfg, /заново|retry|ещ[её]/i.test(text), rows && rows.match);
+        // Если вкладку «Соответствия» в прошлый раз писал старый скрипт Google — по команде переписываем её сразу, не дожидаясь часа.
+        const oldTab = !!((await env.KV.get('stock', 'json').catch(() => null)) || {}).tabOld;
+        const st = await syncStock(env, rows, cfg, oldTab || /заново|retry|ещ[её]/i.test(text));
         if (st.state === 'ok' && st.pending) {
           await send(env, chat, `Нашёл сразу ${st.flavors} вкусов, ещё ${st.pending} позиций отдаю ИИ на разбор — это до минуты…`);
           await resolveStock(env, cfg, rows);
@@ -990,7 +992,7 @@ async function onText(env, msg, ctx) {
           await send(env, chat, `🔎 ${left.length} позиций нет в списках htreviews — ищу их страницы на сайте по прямым ссылкам…`);
           const found = await probeStock(env, cfg, fetch, PROBE_BUDGET_CMD);
           const made = await ownCards(env, cfg);
-          if (found.length || made.length) await syncStock(env, rows, cfg, true, rows && rows.match);
+          if (found.length || made.length) await syncStock(env, rows, cfg, true);
           if (found.length) await send(env, chat, esc(probeText(found)).slice(0, 3800));
           if (made.length) await send(env, chat, esc(ownText(made)).slice(0, 3800));
         }
@@ -1093,7 +1095,7 @@ async function onText(env, msg, ctx) {
 }
 
 /** /config — коротко, что сейчас действует. */
-const CODE_VERSION = '12.37 · 48 (в строке названия — «, крепость ●●○○○»)';
+const CODE_VERSION = '12.38 · 49 (вкладка «Соответствия»: рейтинг, число оценок, ссылка на htreviews; без «Исправить вручную»)';
 export function configSummary(cfg, env = {}, stock = null) {
   const at = cfg._at ? new Date(cfg._at).toLocaleString('ru-RU', { timeZone: 'Europe/Moscow', day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) + ' МСК' : 'ещё не загружалась — работают значения из кода';
   const s = cfg.settings;
@@ -2572,7 +2574,7 @@ export async function ownCards(env, cfg, llm = null) {
 export function ownText(made) {
   return '🧾 Этих вкусов нет на htreviews — сделал для них свои карточки (ИИ по названию), теперь они в подборе:\n' +
     made.map((m) => `• ${m.it.b} ${m.it.l} — ${m.it.n}${m.it.a ? ' (' + m.it.a + ')' : ''}: ${[...m.it.t, ...m.it.q].join(', ') || m.it.g.join(', ')}; ${STRENGTH_NAME[m.it.s] || ''}`).join('\n') +
-    '\nНе так — во вкладке «Соответствия» в колонке «Исправить вручную» можно указать другой табак или «нет».';
+    '\nЧто с чем сопоставлено — во вкладке «Соответствия».';
 }
 
 /** Сообщение админам о найденном по прямой ссылке. */
@@ -2797,7 +2799,6 @@ async function sendPhoto(env, chat, bytes, caption, reply_markup) {
  * Бот берёт из неё табаки наших брендов, сопоставляет со справочником htreviews и собирает миксы только из них.
  */
 export const STOCK_TAB = 'Наличие';
-export const MATCH_TAB = 'Соответствия';
 const itemLabel = (it) => `${it.b} · ${it.l || '—'} · ${it.n}${it.a ? ' (' + it.a + ')' : ''}`;
 const cellNum = (v) => Number(String(v == null ? '' : v).replace(/\s/g, '').replace(',', '.')) || 0;
 
@@ -2882,7 +2883,7 @@ function lineScore(stockLine, catLine) {
  * Сопоставляем позиции склада со справочником. map — готовые ответы (от ИИ или прошлых запусков): id → ключ табака или ''.
  * Возвращает items: { ключ: [веса пачек] } и список нераспознанного.
  */
-export function matchStock(positions, catalog, map = {}, manual = {}) {
+export function matchStock(positions, catalog, map = {}) {
   const brandNames = [...new Set(catalog.map((x) => x.b))];
   // Индекс справочника: бренд + «сжатое» название → табаки. Поиск по нему мгновенный —
   // это важно: у бесплатного Cloudflare очень мало процессорного времени на запрос.
@@ -2901,8 +2902,8 @@ export function matchStock(positions, catalog, map = {}, manual = {}) {
     if (!e) continue;
     tobaccos++;
     if (!done.has(e.id)) {
-      let key = manual[e.id], who = 'вручную';
-      if (key === undefined) { key = map[e.id]; who = ownKeys.has(key) ? 'своя карточка (ИИ)' : known.has(key) && extraKeys.has(key) ? 'прямая ссылка htreviews' : 'ИИ'; }
+      let key = map[e.id];
+      let who = ownKeys.has(key) ? 'своя карточка (ИИ)' : known.has(key) && extraKeys.has(key) ? 'прямая ссылка htreviews' : 'ИИ';
       if (key && !known.has(key)) key = undefined; // ответ указывает на табак, которого в справочнике больше нет
       // Своё совпадение по названию проверяем и тогда, когда ИИ раньше ответил «нет»: справочник мог пополниться.
       // Своя карточка уступает настоящей, как только вкус появился в справочнике htreviews.
@@ -2927,23 +2928,22 @@ export function matchStock(positions, catalog, map = {}, manual = {}) {
   return { items, unmatched, tobaccos, pairs: [...pairs.values()] };
 }
 
+const TAB_RETRY_MS = 3600e3;
 /**
- * Правки менеджера из колонки «Исправить вручную»: «нет» — такого табака в справочнике нет;
- * иначе — слова, по которым табак ищется в справочнике («Spectrum Медиум Honey peach»).
+ * Строка вкладки «Соответствия»: позиция склада, табак из справочника, кто сопоставил, фасовки,
+ * рейтинг, число оценок и ссылка на страницу вкуса. У «своих карточек» (вкуса нет на htreviews) рейтинга и ссылки нет.
  */
-export function manualFixes(tabRows, catalog) {
-  const manual = {}, notes = {};
-  for (const r of (tabRows || []).slice(1)) {
-    const pos = String(r[0] || '').trim(), fix = String(r[4] || '').trim();
-    if (!pos || !fix) continue;
-    const id = pos.split('|').map((x) => x.trim()).join('|').toLowerCase();
-    if (/^(нет|no|-|0|—)$/i.test(fix)) { manual[id] = ''; continue; }
-    const q = words(fix);
-    const hits = catalog.filter((x) => { const hay = squash(itemLabel(x)); return q.length && q.every((wd) => hay.includes(wd)); })
-      .sort((x, y) => squash(itemLabel(x)).length - squash(itemLabel(y)).length);
-    if (hits.length) manual[id] = hits[0].k; else notes[id] = 'правка не понята: такого нет в справочнике';
-  }
-  return { manual, notes };
+export function matchRow(p, it) {
+  const real = it && !it.o;
+  return [
+    p.pos,
+    it ? itemLabel(it) + (it.d ? ' — снят с производства' : '') : 'не найдено — в подборе не участвует',
+    p.who,
+    p.w.sort((a, b) => a - b).join(', '),
+    real && it.c > 0 && it.r > 0 ? it.r : '',
+    real ? it.c || 0 : '',
+    real ? `${SOURCE}/tobaccos/${it.k}` : '',
+  ];
 }
 
 async function allBrandItems(env, cfg) {
@@ -2953,36 +2953,33 @@ async function allBrandItems(env, cfg) {
 const quickHash = (s) => { let h = 5381; for (let i = 0; i < s.length; i++) h = ((h << 5) + h + s.charCodeAt(i)) | 0; return String(h); };
 
 /** Пересчитать наличие по строкам вкладки. Ничего не меняет, если выгрузка и справочник те же. */
-export async function syncStock(env, rows, cfg, force = false, matchRows = null) {
+export async function syncStock(env, rows, cfg, force = false) {
   const prev = await env.KV.get('stock', 'json').catch(() => null);
   const map = (await env.KV.get('stockmap', 'json').catch(() => null)) || {};
   const catmeta = await env.KV.get('catmeta').catch(() => null);
   // Дешёвая проверка до разбора: та же выгрузка, те же ответы ИИ, тот же справочник, тот же день — ничего не делаем.
-  const fixes = (matchRows || []).slice(1).filter((r) => r[4]).map((r) => [r[0], r[4]]);
-  const hash = quickHash(JSON.stringify(rows || [])) + ':' + Object.keys(map).length + ':' + quickHash(JSON.stringify(fixes)) + ':' +
+  const hash = quickHash(JSON.stringify(rows || [])) + ':' + Object.keys(map).length + ':t2:' +
     quickHash(String(catmeta || '')) + ':' + new Date().toISOString().slice(0, 10);
   // …кроме случая, когда в прошлый раз не удалось записать вкладку «Соответствия»: тогда пробуем ещё раз.
-  if (!force && prev && prev.hash === hash && !prev.tabError) return { state: 'ok', changed: false, ...stockStats(prev) };
+  // И если в таблице ещё старый скрипт Google (вкладка без рейтинга и ссылок) — раз в час проверяем, не обновили ли его.
+  const oldTab = prev && prev.tabOld && Date.now() - Date.parse(prev.at) > TAB_RETRY_MS;
+  if (!force && prev && prev.hash === hash && !prev.tabError && !oldTab) return { state: 'ok', changed: false, ...stockStats(prev) };
   const positions = parseStock(rows);
   if (!positions || !positions.length) {
     if (prev) { await env.KV.delete('stock'); catCache = { at: 0, sig: '', items: [] }; }
     return { state: 'none', changed: !!prev };
   }
   const catalog = await allBrandItems(env, cfg);
-  let tabError = '';
-  const { manual, notes } = manualFixes(matchRows, catalog);
-  const res = matchStock(positions, catalog, map, manual);
+  let tabError = '', tabOld = false;
+  const res = matchStock(positions, catalog, map);
   const stock = { at: new Date().toISOString(), hash, positions: positions.length, tobaccos: res.tobaccos, items: res.items, unmatched: res.unmatched };
   await env.KV.put('stock', JSON.stringify(stock));
-  // Вкладка «Соответствия»: что с чем склеено. Пишем, только когда что-то пересчитали.
+  // Вкладка «Соответствия»: что с чем склеено, рейтинг, число оценок и ссылка на htreviews. Пишем, только когда что-то пересчитали.
   if (env.SHEET_SCRIPT_URL && env.SHEET_SECRET) {
     const byKey = new Map(catalog.map((x) => [x.k, x]));
-    const tab = res.pairs.sort((a, b) => a.pos.localeCompare(b.pos, 'ru')).map((p) => {
-      const id = p.pos.split('|').map((x) => x.trim()).join('|').toLowerCase();
-      const it = byKey.get(p.key);
-      return [p.pos, it ? itemLabel(it) + (it.d ? ' — снят с производства' : '') : 'не найдено — в подборе не участвует', notes[id] || p.who, p.w.sort((a, b) => a - b).join(', ')];
-    });
-    tabError = await sheetScript(env, { action: 'match', rows: tab }).then(() => '', (e) => e.message);
+    const tab = res.pairs.sort((a, b) => a.pos.localeCompare(b.pos, 'ru')).map((p) => matchRow(p, byKey.get(p.key)));
+    // v: 2 — колонки нового вида. Старый скрипт Google возьмёт из строки первые четыре и ответит без layout.
+    tabError = await sheetScript(env, { action: 'match', v: 2, rows: tab }).then((j) => { tabOld = !(j && j.layout === 2); return ''; }, (e) => e.message);
     if (tabError) {
       console.log('match tab', tabError);
       if (/unknown action|не знает действие/i.test(tabError)) tabError = 'в таблице развёрнута старая версия скрипта Google — обновите его (Управление развертываниями → карандаш → Новая версия)';
@@ -2991,18 +2988,19 @@ export async function syncStock(env, rows, cfg, force = false, matchRows = null)
   }
   catCache = { at: 0, sig: '', items: [] };
   const same = prev && JSON.stringify(prev.items) === JSON.stringify(stock.items) && (prev.unmatched || []).length === stock.unmatched.length;
-  if (tabError) { stock.tabError = tabError; await env.KV.put('stock', JSON.stringify(stock)); }
-  return { state: 'ok', changed: !same, ...stockStats(stock), tabError };
+  if (tabError || tabOld) {
+    if (tabError) stock.tabError = tabError;
+    if (tabOld) stock.tabOld = true;
+    await env.KV.put('stock', JSON.stringify(stock));
+  }
+  return { state: 'ok', changed: !same, ...stockStats(stock), tabError, tabOld };
 }
 
 /** Прочитать вкладку «Наличие» (через скрипт Google или по открытой ссылке). null — вкладки нет. */
 export async function fetchStockRows(env, fetcher = fetch) {
   if (env.SHEET_SCRIPT_URL && env.SHEET_SECRET) {
-    const j = await sheetScript(env, { action: 'config', tabs: [STOCK_TAB, MATCH_TAB] }, fetcher);
-    const get = (n) => (Array.isArray(j.tabs && j.tabs[n]) ? j.tabs[n].map((r) => r.map((c) => String(c))) : null);
-    const rows = get(STOCK_TAB);
-    if (rows) rows.match = get(MATCH_TAB);
-    return rows;
+    const j = await sheetScript(env, { action: 'config', tabs: [STOCK_TAB] }, fetcher);
+    return Array.isArray(j.tabs && j.tabs[STOCK_TAB]) ? j.tabs[STOCK_TAB].map((r) => r.map((c) => String(c))) : null;
   }
   return fetcher(sheetUrl(env.CONFIG_SHEET_ID, STOCK_TAB).replace('headers=1', 'headers=0'), { headers: { accept: 'text/csv' } })
     .then((r) => r.text()).then((x) => (/^\s*</.test(x) ? null : parseCSV(x))).catch(() => null);
@@ -3050,7 +3048,7 @@ export async function resolveStock(env, cfg, rows = null) {
     mine.forEach((u, i) => { const it = cat[Number(out[String(i + 1)]) - 1]; map[u.id] = it ? it.k : ''; });
   }));
   await env.KV.put('stockmap', JSON.stringify(map));
-  if (rows) await syncStock(env, rows, cfg, true, rows.match);
+  if (rows) await syncStock(env, rows, cfg, true);
   return todo.length;
 }
 
@@ -3062,6 +3060,7 @@ export function stockReport(stock, catmeta = null) {
   const by = {};
   for (const k of Object.keys(stock.items)) { const b = k.split('/')[0]; by[b] = (by[b] || 0) + 1; }
   if (stock.tabError) s += '\n\n⚠️ Вкладка «Соответствия» не записана: ' + stock.tabError;
+  else if (stock.tabOld) s += '\n\nℹ️ В таблице старая версия скрипта Google: вкладка «Соответствия» пока без рейтинга, числа оценок и ссылок. Обновите скрипт и пришлите /stock.';
   s += '\n\nПо брендам: ' + Object.entries(by).map(([b, n]) => `${b} — ${n}`).join(', ');
   if (catmeta && Object.keys(catmeta).length) {
     s += '\nСправочник htreviews: ' + Object.entries(catmeta).map(([b, m]) => `${b} — ${m.total} (${new Date(m.updated).toLocaleDateString('ru-RU', { timeZone: 'Europe/Moscow', day: '2-digit', month: '2-digit' })})`).join(', ');
