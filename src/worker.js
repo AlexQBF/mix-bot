@@ -75,19 +75,20 @@ export const DEFAULT_TEXTS = {
   strength_4: ['средне-крепкая', 'միջին-թունդ', 'Крепость микса'],
   strength_5: ['крепкая', 'թունդ', 'Крепость микса'],
   no_swear: ['Давай без мата 🙂 Напиши то же самое спокойно — и я подберу миксы.', 'Խնդրում եմ առանց հայհոյանքների 🙂 Գրիր նույնը հանգիստ, և ես միքսեր կընտրեմ։', 'Ответ на сообщение с матом'],
-  order_hint: ['🛒 Понравился микс? Нажми на него ниже — подготовлю сообщение менеджеру.', '🛒 Հավանեցի՞ր միքսը։ Սեղմիր ներքևում՝ կպատրաստեմ հաղորդագրություն մենեջերին։',
-    'Под последним миксом, над кнопками заказа'],
+  order_hint: ['Какой берём? 👇', 'Ո՞րն ենք վերցնում 👇', 'Строка перед кнопками миксов: нажатие открывает чат с менеджером с готовым текстом заказа'],
   order_ready: ['Заказ на «{name}» готов. Нажми кнопку — откроется чат с менеджером, текст уже вписан, останется отправить 👇', '«{name}» պատվերը պատրաստ է։ Սեղմիր կոճակը՝ կբացվի զրույց մենեջերի հետ, տեքստն արդեն գրված է, մնում է ուղարկել 👇',
     'Ответ после нажатия «Заказать»'],
   order_open: ['✍️ Написать менеджеру', '✍️ Գրել մենեջերին', 'Кнопка, которая открывает чат с менеджером'],
-  order_btn: ['🛒 Заказать: {name}', '🛒 Պատվիրել՝ {name}', 'Кнопка заказа под миксами; {name} — название микса'],
+  order_btn: ['{name}', '{name}', 'Кнопка заказа под миксами; {name} — эмодзи и название микса'],
   order_text: ['Здравствуйте! Хочу заказать табаки для микса «{name}»:', 'Բարև Ձեզ։ Ուզում եմ պատվիրել ծխախոտներ «{name}» միքսի համար․', 'Первая строка готового сообщения менеджеру'],
   pack_one: ['пачка {g} г', '{g} գ տուփ', 'Пометка у табака: в какой пачке он есть; {g} — вес пачки'],
   pack_many: ['пачки {g} г', 'տուփեր՝ {g} գ', 'Пометка у табака, если есть несколько пачек; {g} — веса через «/»'],
   pack_note: ['только пачка {g} г', 'միայն {g} գ տուփ', 'Пометка у табака, которого нет в маленькой пачке; {g} — вес пачки'],
   bowl_note: ['Граммы указаны на чашу {g} г.', 'Գրամները նշված են {g} գ թասի համար։', 'Под последним миксом; {g} — граммы в чаше'],
   footer: ['🛒 Покажи этот список в магазине — соберём.', '🛒 Ցույց տուր այս ցուցակը խանութում, և մենք կհավաքենք։', 'Под последним миксом, перед ссылкой на сайт'],
-  btn_more: ['🔄 Ещё варианты', '🔄 Այլ տարբերակներ', 'Кнопка под миксами'],
+  btn_more: ['🔄 Ещё', '🔄 Էլի', 'Кнопка под миксами: ещё три варианта на тот же запрос'],
+  btn_stronger: ['💪 Покрепче', '💪 Ավելի թունդ', 'Кнопка под миксами: те же вкусы, но крепче'],
+  btn_lighter: ['🍃 Полегче', '🍃 Ավելի թեթև', 'Кнопка под миксами: те же вкусы, но легче'],
   btn_new: ['✏️ Новый запрос', '✏️ Նոր հարցում', 'Кнопка под миксами'],
   not_relevant: ['Я подбираю кальянные миксы. Напиши, какие вкусы и табаки тебе нравятся и как крепко куришь.',
     'Ես կալյանի միքսեր եմ ընտրում։ Գրիր, թե որ համերն ու ծխախոտներն են քեզ դուր գալիս և որքան թունդ ես ծխում։', 'Если написали не про кальян'],
@@ -179,9 +180,9 @@ export const DEFAULT_INSTRUCTION = [
   'Сначала придумай образ, потом подбери табаки, которые его складывают, — а не наоборот. Образ собирай только из табаков, которые есть в списке; если для образа чего-то не хватает — выбери другой образ, не натягивай.',
   'Хотя бы один из трёх миксов должен удивлять: неожиданное, но логичное сочетание, до которого клиент сам бы не додумался.',
   'Название — это и есть образ: 1–3 слова, сразу рисует картинку и вкус («Виски сауэр», «Малиновый мохито», «Тирамису на террасе», «Пина колада»). Не перечисляй табаки в названии: «Кэтминт с лимоном» — плохо.',
-  'Описание — 2–3 коротких предложения, до 45 слов, на «ты». Это не состав, а соблазн: клиент должен захотеть этот микс, ещё не дочитав. Каждый раз выбирай один ход и строй описание вокруг него: сцена (где и когда это курят), движение вкуса (что сначала, что потом, что на выдохе), ощущение в теле (холодок, тепло, тягучесть, пузырьки), сравнение с десертом или коктейлем, характер микса (дерзкий, ленивый, нежный).',
+  'Описание — ОДНО предложение, до 18 слов, на «ты». Это не состав, а соблазн: клиент должен захотеть этот микс, ещё не дочитав. Каждый раз выбирай один ход и строй предложение вокруг него: сцена (где и когда это курят), движение вкуса (что сначала, что на выдохе), ощущение в теле (холодок, тепло, тягучесть, пузырьки), сравнение с десертом или коктейлем, характер микса (дерзкий, ленивый, нежный).',
   'Три описания в одном ответе — три разных хода, разное начало и разный ритм. Не повторяй одни и те же слова и обороты из микса в микс. Конкретика вместо общих слов: не «приятный вкус», а «ириска, которая тянется». Без воды, канцелярита, «ты почувствуешь» и обещаний про здоровье. Не называй вкусов, которых нет в составе.',
-  'Примеры тона (не копируй обороты, бери настроение): «Летняя терраса, в бокале звенит лёд. Гранатовый апероль горчит ровно настолько, чтобы захотелось ещё, а белый персик смягчает финал.» «Сначала ежевика — тёмная, винная, почти терпкая. Потом её накрывает черничный йогурт, и всё становится бархатным. Персик на выдохе — как мёд с ложки.» «Игристое бьёт в нос пузырьками, манго с ананасом тянут в тропики. Юдзу щиплет язык и не даёт расслабиться.»',
+  'Примеры тона (не копируй обороты, бери настроение): «Гранатовый апероль горчит ровно настолько, чтобы захотелось ещё, а белый персик смягчает финал.» «Тёмная винная ежевика тонет в черничном йогурте и становится бархатной.» «Игристое бьёт в нос пузырьками, а юдзу щиплет язык и не даёт расслабиться.»',
   // Два стиля картинки. Какой работает — настройка image_style; ИИ получает только раздел выбранного стиля.
   'КАРТИНКА: КРУГИ',
   'Одна квадратная картинка на все три микса, премиальная рекламная фуд-съёмка сверху. Светлый почти белый фон с лёгкой серой геометрией: тонкие круги, треугольники, плюсики, пунктир, штриховка.',
@@ -595,7 +596,7 @@ export function tx(cfg, lang = 'ru') {
     strengthRemembered: (s) => fill(g('strength_remembered'), { s }),
     outOfStock: (name) => fill(g('out_of_stock'), { name }),
     strengthTip: (base) => (base ? fill(g('strength_tip'), { base }) : g('strength_tip_nobase')),
-    tooFew: g('too_few'), failed: g('failed'), more: g('btn_more'), newReq: g('btn_new'),
+    tooFew: g('too_few'), failed: g('failed'), more: g('btn_more'), newReq: g('btn_new'), stronger: g('btn_stronger'), lighter: g('btn_lighter'),
     strengthLabel: g('strength_label'),
     strengthNames: ['', g('strength_1'), g('strength_2'), g('strength_3'), g('strength_4'), g('strength_5')],
     gram: g('gram'), packNote: (w) => fill(g('pack_note'), { g: w }), packOne: (w) => fill(g('pack_one'), { g: w }), orderHint: g('order_hint'), orderReady: (name) => fill(g('order_ready'), { name }), orderOpen: g('order_open'), noSwear: g('no_swear'), orderBtn: (name) => fill(g('order_btn'), { name }), orderText: (name) => fill(g('order_text'), { name }), packMany: (w) => fill(g('pack_many'), { g: w }), bowlNote: (gr) => fill(g('bowl_note'), { g: gr }), footer: g('footer'),
@@ -1071,7 +1072,7 @@ async function onText(env, msg, ctx) {
 }
 
 /** /config — коротко, что сейчас действует. */
-const CODE_VERSION = '12.32 · 43 («Новый запрос» сбрасывает и крепость; заказ из старого подбора)';
+const CODE_VERSION = '12.33 · 44 (новая карточка подбора: эмодзи, крепость точками, заказ в одно касание, «Покрепче» / «Полегче»)';
 export function configSummary(cfg, env = {}, stock = null) {
   const at = cfg._at ? new Date(cfg._at).toLocaleString('ru-RU', { timeZone: 'Europe/Moscow', day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) + ' МСК' : 'ещё не загружалась — работают значения из кода';
   const s = cfg.settings;
@@ -1127,7 +1128,7 @@ async function onCallback(env, cq, ctx) {
     // Клиент нажал «Заказать»: отмечаем в журнале и даём кнопку, которая открывает чат с менеджером с готовым текстом.
     // Состав берём из самого сообщения с миксами — кнопка работает под любым подбором, даже старым.
     const i = Number(data.slice(4));
-    const mix = mixesFromMessage(cq.message.text)[i];
+    const mix = mixesFromMessage(cq.message.text || cq.message.caption)[i];
     const cfg = await loadConfig(env);
     const saved = session && Array.isArray(session.orders) ? session.orders[i] : null; // запасной путь: подбор из текущего диалога
     const o = mix ? { title: mix.title, url: orderLink(mix, t, cfg.settings.order_contact) } : saved;
@@ -1138,7 +1139,7 @@ async function onCallback(env, cq, ctx) {
     return;
   }
   if (!session) {
-    if (data === 'more') await keepOrderButtons(env, cq.message);
+    if (data === 'more' || data.startsWith('adj:')) await keepOrderButtons(env, cq.message);
     return send(env, chat, t.expired);
   }
 
@@ -1150,10 +1151,25 @@ async function onCallback(env, cq, ctx) {
     await logToSheet(env, ctx, { action: 'strength', userId: (cq.from && cq.from.id) || chat, strength: STRENGTH_LOG[session.prefs.strength] || session.prefs.strength });
     return makeMixes(env, chat, { text: session.text, prefs: session.prefs, used: [], titles: [] }, false, lang);
   }
+  if (data === 'adj:up' || data === 'adj:down') {
+    // «Покрепче» / «Полегче»: те же вкусы, крепость на ступень в нужную сторону (лёгкая → средняя → крепкая).
+    if (!session.prefs || session.stage === 'ask_strength') return send(env, chat, t.tellFirst);
+    const shown = mixesFromMessage(cq.message.text || cq.message.caption).map((m) => m.title.toLocaleUpperCase('ru'));
+    const known = (session.titles || []).map((x) => String(x).toLocaleUpperCase('ru'));
+    await keepOrderButtons(env, cq.message);
+    if (shown.length && !shown.some((x) => known.includes(x))) return send(env, chat, t.expired);
+    const up = data === 'adj:up', cur = session.prefs.strength;
+    session.prefs.strength = up ? (cur === 'light' ? 'medium' : 'strong') : (cur === 'strong' ? 'medium' : 'light');
+    // Прошлые нажатия этих кнопок из запроса убираем — в нём остаётся одно, последнее уточнение.
+    session.text = (String(session.text || '').replace(/(\n(?:покрепче|полегче))+$/, '') + '\n' + (up ? 'покрепче' : 'полегче')).slice(-1500);
+    await rememberStrength(env, chat, session.prefs.strength);
+    await logToSheet(env, ctx, { action: 'strength', userId: (cq.from && cq.from.id) || chat, strength: STRENGTH_LOG[session.prefs.strength] || session.prefs.strength });
+    return makeMixes(env, chat, session, false, lang);
+  }
   if (data === 'more') {
     if (!session.prefs || session.stage === 'ask_strength') return send(env, chat, t.tellFirst);
     // «Ещё варианты» под старым подбором (после него уже был другой запрос): продолжать нечего — убираем кнопку и просим написать заново.
-    const shown = mixesFromMessage(cq.message.text).map((m) => m.title.toLocaleUpperCase('ru'));
+    const shown = mixesFromMessage(cq.message.text || cq.message.caption).map((m) => m.title.toLocaleUpperCase('ru'));
     const known = (session.titles || []).map((x) => String(x).toLocaleUpperCase('ru'));
     await keepOrderButtons(env, cq.message); // у нового подбора будут свои кнопки
     if (shown.length && !shown.some((x) => known.includes(x))) return send(env, chat, t.expired);
@@ -1173,17 +1189,19 @@ function strengthKeyboard(t) {
 /**
  * Миксы из текста сообщения бота. Кнопка «Заказать» берёт состав прямо из сообщения, под которым она стоит,
  * поэтому работает под любым старым подбором — после «Нового запроса», после «Ещё вариантов», через неделю.
- * Формат блока — тот, что печатает renderMix: название, описание, строки «50% — Табак · Бренд Линейка · пачки 30 / 100 г».
+ * Формат блока — тот, что печатает renderMix: название, описание, строки «50% Табак · Бренд Линейка · пачки 30 / 100 г»
+ * (в подборах до версии 12.33 — «50% — Табак…», их тоже читаем). У карточки с картинкой текст лежит в подписи.
  */
 export function mixesFromMessage(text) {
   return String(text || '').split(/\n\s*\n/).map((block) => {
     const lines = block.split('\n').map((x) => x.trim()).filter(Boolean);
-    const parts = lines.map((l) => l.match(/^(\d{1,3})\s*%\s+—\s+(.+)$/)).filter(Boolean).map((m) => {
+    const parts = lines.map((l) => l.match(/^(\d{1,3})\s*%\s+(?:—\s+)?(.+)$/)).filter(Boolean).map((m) => {
       const seg = m[2].split(' · ');
       const w = (seg[2] || '').match(/\d+/);
       return { p: Number(m[1]), name: seg[0].trim(), brand: (seg[1] || '').trim(), w: w ? Number(w[0]) : 0 };
     });
-    return parts.length ? { title: lines[0], parts } : null;
+    // Название — без эмодзи в начале и точек крепости в конце.
+    return parts.length ? { title: lines[0].replace(/[●○]+/g, '').replace(/^[^\p{L}\p{N}]+/u, '').trim(), parts } : null;
   }).filter(Boolean);
 }
 
@@ -1200,15 +1218,25 @@ export function orderLink(mix, t, contact) {
 /** Под старым подбором оставляем только кнопки «Заказать»: «Ещё варианты» и «Новый запрос» там уже ни к чему не относятся. */
 async function keepOrderButtons(env, msg) {
   const rows = ((msg && msg.reply_markup && msg.reply_markup.inline_keyboard) || []);
-  const keep = rows.filter((r) => r.every((b) => String(b.callback_data || '').startsWith('ord:')));
+  const keep = rows.filter((r) => r.every((b) => b.url || String(b.callback_data || '').startsWith('ord:')));
   if (!msg || keep.length === rows.length) return;
   await tg(env, 'editMessageReplyMarkup', { chat_id: msg.chat.id, message_id: msg.message_id, reply_markup: { inline_keyboard: keep } }).catch(() => {});
 }
 
-function resultKeyboard(t, orders = []) {
+/**
+ * Кнопки под подбором: миксы (нажатие сразу открывает чат с менеджером, текст заказа уже вписан),
+ * быстрые уточнения «Покрепче» / «Полегче» / «Ещё» и «Новый запрос». Крепче крепкого и легче лёгкого кнопок нет.
+ */
+function resultKeyboard(t, orders = [], strength = 'any') {
+  const quick = [
+    ...(strength !== 'strong' ? [{ text: t.stronger, callback_data: 'adj:up' }] : []),
+    ...(strength !== 'light' ? [{ text: t.lighter, callback_data: 'adj:down' }] : []),
+    { text: t.more, callback_data: 'more' },
+  ];
   return { inline_keyboard: [
-    ...orders.map((o, i) => [{ text: o.text, callback_data: 'ord:' + i }]),
-    [{ text: t.more, callback_data: 'more' }, { text: t.newReq, callback_data: 'new' }],
+    ...orders.map((o) => [{ text: o.text, url: o.url }]),
+    quick,
+    [{ text: t.newReq, callback_data: 'new' }],
   ] };
 }
 
@@ -1231,7 +1259,8 @@ export function orderButtons(mixes, t, contact) {
     let url = link(true);
     if (url.length > 1900) url = link(false); // слишком длинная ссылка — без названий линеек
     if (url.length > 1900) url = `https://t.me/${user}?text=` + encodeURIComponent(t.orderText(title));
-    return { text: t.orderBtn(title).slice(0, 60), url, title };
+    const nice = m.title.charAt(0).toLocaleUpperCase('ru') + m.title.slice(1);
+    return { text: t.orderBtn(`${m.emoji ? m.emoji + ' ' : ''}${nice}`).slice(0, 60), url, title };
   });
 }
 
@@ -1240,6 +1269,7 @@ export function orderButtons(mixes, t, contact) {
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 /** Сообщение-«загрузка»: каждые ~2,5 с меняет фразу, пока бот работает. stop() убирает его. */
+const CAPTION_MAX = 1000;        // подпись к картинке в Telegram — до 1024 знаков; берём с запасом
 const PROGRESS_EDITS = 14;       // смен фразы за один ответ (≈ 40 секунд), дальше остаётся последняя
 // Потолки ожидания — только страховка от вечного зависания. Медленный ответ платного ИИ — не повод переходить на бесплатный:
 // ждём столько, сколько нужно. Бесплатная модель подключается, только когда платная недоступна (ошибка, кончился баланс).
@@ -1326,28 +1356,36 @@ async function makeMixes(env, chat, session, more = false, lang = 'ru', note = '
   session.stage = 'done';
   session.used = [...(session.used || []), ...result.flatMap((m) => m.parts.map((p) => p.item.k))].slice(-80);
   session.titles = [...(session.titles || []), ...result.map((m) => m.title)].slice(-15);
-  // Кнопки «Заказать»: сами ссылки с текстом заказа храним в диалоге — бот отдаёт их по нажатию и отмечает нажатие в журнале.
+  // Кнопки миксов — прямые ссылки в чат с менеджером (заказ в одно касание), в диалоге их хранить не нужно.
   const orders = orderButtons(result, t, cfg.settings.order_contact);
-  session.orders = orders.map((o) => ({ title: o.title, url: o.url }));
+  delete session.orders;
+  // «Сейчас нет в наличии…» говорим один раз: по кнопкам «Покрепче» / «Полегче» / «Ещё» не повторяем.
+  const tellGone = !more && !session.goneTold && (session.missing || []).length > 0;
+  session.goneTold = true;
   await putSession(env, chat, session);
 
   const bowl = cfg.settings.bowl_grams;
   const shop = cfg.settings.shop_url;
   // Одной строкой перед миксами: чего нет в наличии. Дальше миксы как обычно, без оговорок в описаниях.
-  const gone = !more && (session.missing || []).length ? esc(t.outOfStock(session.missing.map((m) => m.name).join(', '))) + '\n\n' : '';
+  const gone = tellGone ? esc(t.outOfStock(session.missing.map((m) => m.name).join(', '))) + '\n\n' : '';
   const bst = candidates.booster;
   const tip = result.some((m) => m.softer)
     ? '\n\n' + esc(t.strengthTip(bst ? `${bst.b}${bst.l && bst.l !== 'Основная' ? ' ' + bst.l : ''} ${bst.n}` : '')) : '';
   const text = gone + result.map((m, i) => renderMix(m, i, t, result.length, bowl)).join('\n\n') + tip +
     '\n\n' + (orders.length ? t.orderHint : t.footer + (shop ? ' ' + shop : ''));
-  const sendMixes = () => send(env, chat, text, resultKeyboard(t, orders));
+  const kb = resultKeyboard(t, orders, session.prefs.strength);
+  const sendMixes = () => send(env, chat, text, kb);
   const ti = Date.now();
   if (cfg.settings.images && cfg.settings.image_first) {
-    // Вместе: «загрузка» крутится, пока рисуется картинка, потом сразу картинка и текст. Текст без картинки вперёд не уходит.
+    // Вместе: «загрузка» крутится, пока рисуется картинка. Потом одна карточка: картинка, под ней миксы и кнопки.
+    // У подписи к картинке в Telegram предел 1024 знака: не влезло — картинка и текст двумя сообщениями подряд, как раньше.
     const photo = await coverImage(env, result, cfg);
     await progress.stop();
-    if (photo) await sendPhoto(env, chat, photo, '');
-    await sendMixes();
+    if (photo && stripTags(text).length <= CAPTION_MAX) await sendPhoto(env, chat, photo, text, kb);
+    else {
+      if (photo) await sendPhoto(env, chat, photo, '');
+      await sendMixes();
+    }
     tm.text = Date.now() - t0;
   } else {
     await progress.stop();
@@ -1627,7 +1665,8 @@ export function composePrompt(cfg, lang = 'ru') {
         'Текст на картинке — на ' + t.llmLang + ' языке: подписи вкусов по 1–2 слова («печенье», «карамель», «лимон») рядом с тем, что они называют, БЕЗ линий и стрелок; под каждым миксом его название заглавными буквами, без цифр и номеров. Шрифты и цвет текста не описывай — их задаёт бот. ' +
         'Каждую подпись и каждое название дай в задании дословно в ОДИНАРНЫХ кавычках (\'лимон\') и укажи, к какому миксу и к какой его части они относятся. Двойные кавычки внутри image не ставь — они ломают JSON. Бренды и проценты не пиши.\n'
       : '  На картинке никакого текста, кроме логотипа, даже если в инструкции сказано иначе: ни подписей, ни названий, ни цифр.\n') +
-    'Верни ТОЛЬКО JSON: {"mixes":[{"title":"","parts":[{"n":1,"p":50,"look":""}],"text":"","strength":3,"garnish":""}],"image":""}';
+    '- "emoji": ОДИН эмодзи главного вкуса или образа микса (🍓 🍋 🍉 🍫 🌿 ☕ 🧀 🥃 🍰…). У трёх миксов — три разных.\n' +
+    'Верни ТОЛЬКО JSON: {"mixes":[{"title":"","emoji":"🍓","parts":[{"n":1,"p":50,"look":""}],"text":"","strength":3,"garnish":""}],"image":""}';
 }
 
 async function composeMixes(env, session, candidates, lang = 'ru', cfg = DEFAULTS) {
@@ -1741,6 +1780,13 @@ export function withBase(parts, base, step, minParts = 2) {
   return [{ ...parts[0], p: 100 - rest.reduce((a, p) => a + p.p, 0) }, ...rest].sort((a, b) => b.p - a.p);
 }
 
+const EMOJI_FALLBACK = ['🔸', '🔹', '▫️'];
+/** Первый эмодзи из ответа ИИ (или пусто, если там не эмодзи). */
+export function oneEmoji(x) {
+  const m = String(x || '').match(/\p{Extended_Pictographic}(?:\uFE0F|\u200D\p{Extended_Pictographic}|\p{Emoji_Modifier})*/u);
+  return m ? m[0] : '';
+}
+
 export function validateMixes(out, candidates, cfg = DEFAULTS, asked = new Set(), want = 'any') {
   if (cfg && !cfg.settings && cfg.strength !== undefined) cfg = DEFAULTS; // старый вызов (prefs вместо cfg)
   const st = (cfg || DEFAULTS).settings;
@@ -1789,6 +1835,7 @@ export function validateMixes(out, candidates, cfg = DEFAULTS, asked = new Set()
     const sNum = (want === 'strong' && sAi > sCalc) || (want === 'light' && sAi < sCalc) || Math.abs(sAi - sCalc) > 1 ? sCalc : sAi;
     res.push({
       title: String(m.title || 'Микс').slice(0, 60),
+      emoji: oneEmoji(m.emoji) || EMOJI_FALLBACK[res.length % EMOJI_FALLBACK.length],
       text: String(m.text || '').slice(0, 700),
       // Крепость — от ИИ (он знает поправки из инструкции); если не дал — считаем по табакам.
       strength: sNum >= 1 && sNum <= 5 ? sNum : mixStrength(parts, st.strong_words),
@@ -1830,14 +1877,16 @@ export function renderMix(m, i, t = 'ru', total = 3, bowl = 20) {
     // Фасовка из наличия: «пачка 25 г», «пачки 25 / 100 г», а если есть только большая — «только пачка 200 г».
     const w = Array.isArray(it.w) ? [...new Set(it.w)].sort((a, b) => a - b) : [];
     const pack = !w.length ? '' : ` · <i>${esc(w.length > 1 ? t.packMany(w.join(' / ')) : w[0] > 40 ? t.packNote(w[0]) : t.packOne(w[0]))}</i>`;
-    return `${p.p}% — <b>${esc(it.n)}</b> · ${esc(it.b + line)}${pack}`;
+    return `${p.p}%\u2002<b>${esc(it.n)}</b> · ${esc(it.b + line)}${pack}`;
   });
-  const strength = typeof m.strength === 'number' ? t.strengthNames[m.strength] : m.strength;
+  // Крепость — пятью точками в строке названия: ●●○○○. Если числа нет (старые данные) — словами отдельной строкой.
+  const n = typeof m.strength === 'number' && m.strength >= 1 && m.strength <= 5 ? m.strength : 0;
+  const dots = n ? '\u2002' + '●'.repeat(n) + '○'.repeat(5 - n) : '';
+  const words = !n && m.strength ? '\n' + t.strengthLabel + ' ' + esc(m.strength) : '';
   return (
-    `<b>${esc(m.title.toLocaleUpperCase(t.lang === 'hy' ? 'hy' : 'ru'))}</b>\n` +
+    `${m.emoji ? m.emoji + ' ' : ''}<b>${esc(m.title.toLocaleUpperCase(t.lang === 'hy' ? 'hy' : 'ru'))}</b>${dots}\n` +
     (m.text ? `<i>${esc(m.text)}</i>\n` : '') +
-    `<blockquote>${parts.join('\n')}</blockquote>` +
-    (strength ? '\n' + t.strengthLabel + ' ' + esc(strength) : '')
+    `<blockquote>${parts.join('\n')}</blockquote>` + words
   ).trim();
 }
 
@@ -2694,7 +2743,11 @@ async function sendPhoto(env, chat, bytes, caption, reply_markup) {
   form.append('photo', new Blob([bytes], { type: 'image/jpeg' }), 'mix.jpg');
   const r = await fetch(`https://api.telegram.org/bot${env.BOT_TOKEN}/sendPhoto`, { method: 'POST', body: form });
   const j = await r.json().catch(() => ({}));
-  if (!j.ok) { console.log('tg sendPhoto', JSON.stringify(j).slice(0, 300)); if (caption) await send(env, chat, caption, reply_markup); }
+  if (!j.ok) {
+    console.log('tg sendPhoto', JSON.stringify(j).slice(0, 300));
+    // Карточка с подписью не прошла (например, подпись длиннее, чем разрешает Telegram) — шлём по-старому: картинка, следом текст.
+    if (caption) { await sendPhoto(env, chat, bytes, ''); await send(env, chat, caption, reply_markup); }
+  }
 }
 
 /* ═════════════════════════ Наличие (выгрузка склада) ═════════════════════════
