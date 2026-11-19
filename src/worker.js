@@ -932,6 +932,7 @@ async function onText(env, msg, ctx) {
   }
   if (cmd === '/new') {
     await env.KV.delete('s:' + chat);
+    await env.KV.delete('strength:' + chat).catch(() => {}); // как и кнопка «Новый запрос»: крепость тоже спросим заново
     return send(env, chat, (await txt(env, await getLang(env, chat))).restart);
   }
   // Служебные команды: /id — всем (чтобы узнать свой ID для настройки admins), остальные — только админам.
@@ -1070,7 +1071,7 @@ async function onText(env, msg, ctx) {
 }
 
 /** /config — коротко, что сейчас действует. */
-const CODE_VERSION = '12.30 · 41 (совет про крепкую основу — только когда просили конкретный вкус)';
+const CODE_VERSION = '12.32 · 43 («Новый запрос» сбрасывает и крепость; заказ из старого подбора)';
 export function configSummary(cfg, env = {}, stock = null) {
   const at = cfg._at ? new Date(cfg._at).toLocaleString('ru-RU', { timeZone: 'Europe/Moscow', day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) + ' МСК' : 'ещё не загружалась — работают значения из кода';
   const s = cfg.settings;
@@ -1115,10 +1116,31 @@ async function onCallback(env, cq, ctx) {
   const session = await getSession(env, chat);
 
   if (data === 'new') {
+    // Новый запрос — чистый лист: забываем прошлые вкусы, уже предложенные миксы и запомненную крепость (спросим её заново).
+    // Заказать миксы из старого подбора по-прежнему можно: кнопки «Заказать» под ним остаются.
     await env.KV.delete('s:' + chat);
+    await env.KV.delete('strength:' + chat).catch(() => {});
+    await keepOrderButtons(env, cq.message);
     return send(env, chat, t.restart);
   }
-  if (!session) return send(env, chat, t.expired);
+  if (data.startsWith('ord:')) {
+    // Клиент нажал «Заказать»: отмечаем в журнале и даём кнопку, которая открывает чат с менеджером с готовым текстом.
+    // Состав берём из самого сообщения с миксами — кнопка работает под любым подбором, даже старым.
+    const i = Number(data.slice(4));
+    const mix = mixesFromMessage(cq.message.text)[i];
+    const cfg = await loadConfig(env);
+    const saved = session && Array.isArray(session.orders) ? session.orders[i] : null; // запасной путь: подбор из текущего диалога
+    const o = mix ? { title: mix.title, url: orderLink(mix, t, cfg.settings.order_contact) } : saved;
+    if (!o || !o.url) return send(env, chat, t.footer + (cfg.settings.shop_url ? ' ' + cfg.settings.shop_url : ''));
+    await logToSheet(env, ctx, { action: 'order', userId: (cq.from && cq.from.id) || chat, mix: o.title });
+    const j = await send(env, chat, esc(t.orderReady(o.title)), { inline_keyboard: [[{ text: t.orderOpen, url: o.url }]] });
+    if (j && j.ok === false) await send(env, chat, t.footer + (cfg.settings.shop_url ? ' ' + cfg.settings.shop_url : ''));
+    return;
+  }
+  if (!session) {
+    if (data === 'more') await keepOrderButtons(env, cq.message);
+    return send(env, chat, t.expired);
+  }
 
   if (data.startsWith('str:')) {
     session.prefs.strength = data.slice(4);
@@ -1128,17 +1150,13 @@ async function onCallback(env, cq, ctx) {
     await logToSheet(env, ctx, { action: 'strength', userId: (cq.from && cq.from.id) || chat, strength: STRENGTH_LOG[session.prefs.strength] || session.prefs.strength });
     return makeMixes(env, chat, { text: session.text, prefs: session.prefs, used: [], titles: [] }, false, lang);
   }
-  if (data.startsWith('ord:')) {
-    // Клиент нажал «Заказать»: отмечаем в журнале и даём кнопку, которая открывает чат с менеджером с готовым текстом.
-    const o = (session.orders || [])[Number(data.slice(4))];
-    if (!o) return send(env, chat, t.expired);
-    await logToSheet(env, ctx, { action: 'order', userId: (cq.from && cq.from.id) || chat, mix: o.title });
-    const j = await send(env, chat, esc(t.orderReady(o.title)), { inline_keyboard: [[{ text: t.orderOpen, url: o.url }]] });
-    if (j && j.ok === false) { const c2 = await loadConfig(env); await send(env, chat, t.footer + (c2.settings.shop_url ? ' ' + c2.settings.shop_url : '')); }
-    return;
-  }
   if (data === 'more') {
     if (!session.prefs || session.stage === 'ask_strength') return send(env, chat, t.tellFirst);
+    // «Ещё варианты» под старым подбором (после него уже был другой запрос): продолжать нечего — убираем кнопку и просим написать заново.
+    const shown = mixesFromMessage(cq.message.text).map((m) => m.title.toLocaleUpperCase('ru'));
+    const known = (session.titles || []).map((x) => String(x).toLocaleUpperCase('ru'));
+    await keepOrderButtons(env, cq.message); // у нового подбора будут свои кнопки
+    if (shown.length && !shown.some((x) => known.includes(x))) return send(env, chat, t.expired);
     return makeMixes(env, chat, session, true, lang);
   }
 }
@@ -1150,6 +1168,41 @@ function strengthKeyboard(t) {
     { text: s[1], callback_data: 'str:medium' },
     { text: s[2], callback_data: 'str:strong' },
   ], [{ text: s[3], callback_data: 'str:any' }]] };
+}
+
+/**
+ * Миксы из текста сообщения бота. Кнопка «Заказать» берёт состав прямо из сообщения, под которым она стоит,
+ * поэтому работает под любым старым подбором — после «Нового запроса», после «Ещё вариантов», через неделю.
+ * Формат блока — тот, что печатает renderMix: название, описание, строки «50% — Табак · Бренд Линейка · пачки 30 / 100 г».
+ */
+export function mixesFromMessage(text) {
+  return String(text || '').split(/\n\s*\n/).map((block) => {
+    const lines = block.split('\n').map((x) => x.trim()).filter(Boolean);
+    const parts = lines.map((l) => l.match(/^(\d{1,3})\s*%\s+—\s+(.+)$/)).filter(Boolean).map((m) => {
+      const seg = m[2].split(' · ');
+      const w = (seg[2] || '').match(/\d+/);
+      return { p: Number(m[1]), name: seg[0].trim(), brand: (seg[1] || '').trim(), w: w ? Number(w[0]) : 0 };
+    });
+    return parts.length ? { title: lines[0], parts } : null;
+  }).filter(Boolean);
+}
+
+/** Ссылка в чат с менеджером с готовым текстом заказа — по миксу, прочитанному из сообщения. */
+export function orderLink(mix, t, contact) {
+  const user = String(contact || '').trim().replace(/^https?:\/\/t\.me\//i, '').replace(/^@/, '');
+  if (!mix || !/^[a-z][a-z0-9_]{3,31}$/i.test(user)) return null;
+  const body = t.orderText(mix.title) + '\n\n' + mix.parts.map((p) => `— ${p.name}${p.brand ? ' · ' + p.brand : ''}` + (p.w ? `, ${t.packOne(p.w)}` : '')).join('\n');
+  let url = `https://t.me/${user}?text=` + encodeURIComponent(body);
+  if (url.length > 1900) url = `https://t.me/${user}?text=` + encodeURIComponent(t.orderText(mix.title));
+  return url;
+}
+
+/** Под старым подбором оставляем только кнопки «Заказать»: «Ещё варианты» и «Новый запрос» там уже ни к чему не относятся. */
+async function keepOrderButtons(env, msg) {
+  const rows = ((msg && msg.reply_markup && msg.reply_markup.inline_keyboard) || []);
+  const keep = rows.filter((r) => r.every((b) => String(b.callback_data || '').startsWith('ord:')));
+  if (!msg || keep.length === rows.length) return;
+  await tg(env, 'editMessageReplyMarkup', { chat_id: msg.chat.id, message_id: msg.message_id, reply_markup: { inline_keyboard: keep } }).catch(() => {});
 }
 
 function resultKeyboard(t, orders = []) {
