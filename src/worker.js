@@ -58,6 +58,12 @@ export const DEFAULT_TEXTS = {
     'Фразы, которые сменяют друг друга, пока бот думает. Разделяются знаком |'],
   strength_remembered: ['{s} — как ты любишь. Хочешь поменять — скажи.', '{s}՝ ինչպես սիրում ես։ Ուզում ես փոխել՝ ասա։',
     'Под «Подбираю миксы…», если бот взял крепость из прошлого запроса'],
+  strength_tip: ['💡 Эти вкусы — из лёгкой линейки, поэтому миксы вышли мягче, чем ты просил. Хочешь покрепче — возьми к ним крепкую основу {base} и добавь в чашу по вкусу.',
+    '💡 Այս համերը թեթև շարքից են, դրա համար միքսերը խնդրածից մեղմ են ստացվել։ Ուզում ես ավելի թունդ՝ վերցրու թունդ հիմք {base} և ավելացրու գլխիկին ըստ ճաշակի։',
+    'Строка под миксами, если нужный клиенту вкус есть только в лёгком табаке и миксы вышли легче, чем он просил. {base} — крепкая основа из наличия'],
+  strength_tip_nobase: ['💡 Эти вкусы — из лёгкой линейки, поэтому миксы вышли мягче, чем ты просил. Хочешь покрепче — забей чашу поплотнее.',
+    '💡 Այս համերը թեթև շարքից են, դրա համար միքսերը խնդրածից մեղմ են ստացվել։ Ուզում ես ավելի թունդ՝ գլխիկը լցրու ավելի խիտ։',
+    'То же, если крепкой основы в наличии нет'],
   out_of_stock: ['Сейчас нет в наличии: {name}. Собрали миксы с похожим вкусом из того, что есть 👇', 'Հիմա առկա չէ՝ {name}։ Հավաքել ենք նման համով միքսեր առկա տեսականուց 👇',
     'Строка перед миксами, если клиент попросил табак, которого нет в наличии'],
   picking_more: ['🔄 Думаю над другими вариантами…', '🔄 Մտածում եմ այլ տարբերակների մասին…', 'После кнопки «Ещё варианты»'],
@@ -588,6 +594,7 @@ export function tx(cfg, lang = 'ru') {
     progress: g('progress').split('|').map((x) => x.trim()).filter(Boolean),
     strengthRemembered: (s) => fill(g('strength_remembered'), { s }),
     outOfStock: (name) => fill(g('out_of_stock'), { name }),
+    strengthTip: (base) => (base ? fill(g('strength_tip'), { base }) : g('strength_tip_nobase')),
     tooFew: g('too_few'), failed: g('failed'), more: g('btn_more'), newReq: g('btn_new'),
     strengthLabel: g('strength_label'),
     strengthNames: ['', g('strength_1'), g('strength_2'), g('strength_3'), g('strength_4'), g('strength_5')],
@@ -654,6 +661,16 @@ export function popularity(it) {
   return (adj - POP_PRIOR) * 1.5 + Math.min(Math.log10(c + 1), 2.5) * 0.4;
 }
 const HELPER_TASTES = ['кислый', 'освежающий'];
+// Общие слова-направления: по ним бот не делает исключений из крепости и не пишет подсказку про основу.
+const GENERIC_TASTES = ['гастрономия', 'гастрономический', 'еда', 'фрукты', 'фруктовый', 'ягоды', 'ягодный', 'цитрус', 'цитрусовый', 'десерт', 'десертный',
+  'сладкий', 'сладкое', 'кислый', 'кислое', 'свежий', 'свежесть', 'освежающий', 'холодок', 'напиток', 'напитки', 'алкоголь', 'алкогольный', 'специи', 'пряный', 'пряности',
+  'травы', 'травяной', 'цветы', 'цветочный', 'орехи', 'ореховый', 'табак', 'табачный', 'нейтральный', 'нейтральное', 'тропики', 'тропический', 'экзотика'];
+const STRONG_FROM = 3.5;   // средняя крепость микса по долям: от неё микс «крепкий» (средне-крепкая и выше)
+const BOOSTER_RE = /(^|[^a-zа-яё])(no\s*aroma|без\s*аромат[а-я]*|безаром[а-я]*|base|баз[аы]|neutral|нейтральн[а-я]*)([^a-zа-яё]|$)/i;
+/** Нейтральная основа без аромата (No Aroma, Base, «база») не легче средней. В миксы её бот сам не подмешивает (вкус разбавится) — советует клиенту одной строкой. */
+export const isBooster = (it, words) => BOOSTER_RE.test(`${it.n} ${it.a || ''}`) && effStrength(it, words) >= 3;
+const avgStrength = (parts, words) => parts.reduce((a, p) => a + p.p * effStrength(p.item, words), 0) / 100;
+
 
 /* ═════════════════════════ Входные точки ═════════════════════════ */
 
@@ -1053,7 +1070,7 @@ async function onText(env, msg, ctx) {
 }
 
 /** /config — коротко, что сейчас действует. */
-const CODE_VERSION = '12.27 · 38 (уточнение крепости не сбрасывает вкусы прошлого запроса)';
+const CODE_VERSION = '12.30 · 41 (совет про крепкую основу — только когда просили конкретный вкус)';
 export function configSummary(cfg, env = {}, stock = null) {
   const at = cfg._at ? new Date(cfg._at).toLocaleString('ru-RU', { timeZone: 'Europe/Moscow', day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) + ' МСК' : 'ещё не загружалась — работают значения из кода';
   const s = cfg.settings;
@@ -1265,7 +1282,10 @@ async function makeMixes(env, chat, session, more = false, lang = 'ru', note = '
   const shop = cfg.settings.shop_url;
   // Одной строкой перед миксами: чего нет в наличии. Дальше миксы как обычно, без оговорок в описаниях.
   const gone = !more && (session.missing || []).length ? esc(t.outOfStock(session.missing.map((m) => m.name).join(', '))) + '\n\n' : '';
-  const text = gone + result.map((m, i) => renderMix(m, i, t, result.length, bowl)).join('\n\n') +
+  const bst = candidates.booster;
+  const tip = result.some((m) => m.softer)
+    ? '\n\n' + esc(t.strengthTip(bst ? `${bst.b}${bst.l && bst.l !== 'Основная' ? ' ' + bst.l : ''} ${bst.n}` : '')) : '';
+  const text = gone + result.map((m, i) => renderMix(m, i, t, result.length, bowl)).join('\n\n') + tip +
     '\n\n' + (orders.length ? t.orderHint : t.footer + (shop ? ' ' + shop : ''));
   const sendMixes = () => send(env, chat, text, resultKeyboard(t, orders));
   const ti = Date.now();
@@ -1446,12 +1466,41 @@ export function pickCandidates(catalog, prefs, used = [], more = false, cfg = DE
     return true; // «без разницы» / не сказал — всё, кроме крепкого
   };
 
-  const scored = [];
-  for (const it of catalog) {
-    if (!okStrength(it)) continue;
-    const tagStems = it.t.map(stem);
-    const nameWords = norm(it.n + ' ' + it.a).split(/[^a-zа-я0-9]+/).filter(Boolean).map(stem);
+  // Вкус важнее крепости: табак с нужным клиенту вкусом берём и тогда, когда он легче или чуть крепче просьбы.
+  // Микс получится мягче — клиенту об этом скажем одной строкой и посоветуем крепкую основу. Совсем крепкое в лёгкий микс не берём.
+  const okAsTaste = (it) => {
+    const strongLine = isStrongLine(it, st.strong_words);
+    if (prefs.strength === 'strong') return true;
+    if (st.strong_only_on_request && (strongLine || it.s >= 5)) return false;
+    if (prefs.strength === 'light') return !strongLine && (!it.s || it.s <= 3);
+    return true;
+  };
+
+  // Исключение из фильтра по крепости — только для узкого случая: клиент просит КОНКРЕТНЫЙ вкус («аджика», «бекон», «пломбир»)
+  // или называет табак, а в подходящей крепости такого вкуса на складе нет совсем. Общие направления («гастрономия», «ягоды»,
+  // «что-нибудь сладкое») сюда не относятся: там бот просто подбирает из табаков нужной крепости.
+  const generic = new Set([...GENERIC_TASTES, ...catalog.flatMap((it) => it.g)].map(stem));
+  const specific = like.filter((l) => !generic.has(l));
+  const rows = catalog.map((it) => ({
+    it, tagStems: it.t.map(stem),
+    nameWords: norm(it.n + ' ' + it.a).split(/[^a-zа-я0-9]+/).filter(Boolean).map(stem),
+    named: flavors.some((f) => similarName(f, it.n) || (it.a && similarName(f, it.a))),
+    fits: okStrength(it),
+  }));
+  const has = (r, l) => r.tagStems.includes(l) || r.nameWords.includes(l);
+  // Конкретные вкусы, которых в подходящей крепости нет ни в одном табаке.
+  const onlyOff = specific.filter((l) => !rows.some((r) => r.fits && has(r, l)));
+  const offTaste = new Set();
+
+  const scored = [], boosters = [];
+  for (const r of rows) {
+    const { it, tagStems, nameWords, fits } = r;
     if (avoid.some((a) => tagStems.includes(a) || nameWords.includes(a))) continue;
+    const wanted = r.named || onlyOff.some((l) => has(r, l));
+    // Крепкие нейтральные основы из наличия запоминаем: одну из них посоветуем клиенту, если миксы выйдут легче просьбы.
+    if (isBooster(it, st.strong_words) && effStrength(it, st.strong_words) >= 4) boosters.push(it);
+    if (!fits && !(wanted && okAsTaste(it))) continue;
+    if (!fits) offTaste.add(it.k);
 
     let score = 0;
     for (const l of like) {
@@ -1462,6 +1511,7 @@ export function pickCandidates(catalog, prefs, used = [], more = false, cfg = DE
     if (flavors.some((f) => similarName(f, it.n) || (it.a && similarName(f, it.a)))) score += 4;
     if (brands.some((b) => similarName(b, it.b))) score += 1.5;
     const base = score;
+    if (!fits) score -= 1; // тот же вкус в подходящей крепости — вперёд
     score += popularity(it);
     if (st.prefer_small_packs && bigOnly(it)) score -= PACK_PENALTY;
     if (usedSet.has(it.k)) score -= 3;
@@ -1478,7 +1528,11 @@ export function pickCandidates(catalog, prefs, used = [], more = false, cfg = DE
     // «Помощники» почти всегда идут дополнением на 10–20% — ради них большую пачку покупать обиднее всего.
     .sort((a, b) => (b.it.r - (pen(b.it))) - (a.it.r - pen(a.it)) + (b.score - a.score) * 0.1)
     .slice(0, HELPERS);
-  return [...main, ...helpers].map((x) => x.it);
+  boosters.sort((a, b) => (bigOnly(a) ? 1 : 0) - (bigOnly(b) ? 1 : 0) || effStrength(b, st.strong_words) - effStrength(a, st.strong_words) || (b.c || 0) - (a.c || 0));
+  const list = [...main, ...helpers].map((x) => x.it);
+  list.booster = boosters[0] || null; // основа для совета клиенту; в список для ИИ она отдельно не добавляется
+  list.offTaste = offTaste;           // табаки с конкретным вкусом клиента, взятые вопреки крепости: по ним решаем, нужна ли подсказка
+  return list;
 }
 
 /**
@@ -1495,6 +1549,10 @@ export function composePrompt(cfg, lang = 'ru') {
     'ТЕХНИЧЕСКИЕ ТРЕБОВАНИЯ:\n' +
     '- Собери ровно 3 микса ТОЛЬКО из табаков списка. Формат строки списка: номер|табак|крепость по htreviews|рейтинг (число оценок)|вкусы [группы] {характер вкуса: сладкий, кислый, терпкий, освежающий…}|пачки на складе, г. Характер вкуса помогает балансу: сладкое уравновешивай кислым или освежающим.\n' +
     '- Рейтинг и число оценок — с htreviews. Из табаков с одинаковым вкусом и подходящей крепостью бери тот, у кого рейтинг выше; при близком рейтинге — у кого больше оценок (ему больше доверия). Табаки без рейтинга («-») бери, только если без них не собрать то, что просит клиент.\n' +
+    '- Вкус важнее крепости. Если нужный клиенту вкус есть в табаке подходящей крепости — бери его. Если он есть только в более лёгком (или чуть более крепком) табаке — ' +
+      'НЕ заменяй вкус на другой: собери микс вокруг этого табака, как обычно. Не подмешивай нейтральную крепкую основу без аромата ради крепости — вкус разбавится; ' +
+      'клиенту отдельно подскажут, как сделать крепче. Мешать лёгкое с крепким можно, но следи за вкусом: яркий крепкий табак не должен перебить то, что просил клиент. ' +
+      'В "strength" пиши честную крепость получившегося микса с учётом долей, даже если она ниже или выше просьбы.\n' +
     (st.prefer_small_packs ? `- Фасовка. Чаша — ${st.bowl_grams} г, клиент покупает пачки целиком. Пометка «только 100 г» / «только 200 г» значит, что табак есть лишь в большой пачке. ` +
       'Такой табак ставь базой микса. Дополнением (доля до 30%) бери его, только если в списке нет табака с тем же вкусом в маленькой пачке и близким рейтингом (разница до 0.3) — ' +
       'ради щепотки клиент большую пачку не купит. Вкус и просьба клиента важнее фасовки: если без этого табака микс получится хуже — оставь его. Табаки с ★ бери в любой фасовке.\n' : '') +
@@ -1535,7 +1593,7 @@ async function composeMixes(env, session, candidates, lang = 'ru', cfg = DEFAULT
       '. Не отказывай и не предлагай ждать поступления: собери три микса с максимально похожим вкусом из списка. Клиенту уже отдельно сказали, что этого табака нет: в названиях и описаниях миксов его не упоминай и не пиши про замену — описывай миксы как обычно.\n' : '') +
     '\nТабаки в наличии:\n' + lines.join('\n');
   const out = await llmJson(env, composePrompt(cfg, lang), user, 4000);
-  const mixes = validateMixes(out, candidates, cfg, asked);
+  const mixes = validateMixes(out, candidates, cfg, asked, session.prefs.strength);
   if (out && !mixes.length) {
     await reportProblem(env, 'nomix', '⚠️ ИИ ответил, но ни один микс не прошёл проверку (номера табаков, доли). Начало ответа:\n' + JSON.stringify(out).slice(0, 600));
   }
@@ -1630,10 +1688,11 @@ export function withBase(parts, base, step, minParts = 2) {
   return [{ ...parts[0], p: 100 - rest.reduce((a, p) => a + p.p, 0) }, ...rest].sort((a, b) => b.p - a.p);
 }
 
-export function validateMixes(out, candidates, cfg = DEFAULTS, asked = new Set()) {
+export function validateMixes(out, candidates, cfg = DEFAULTS, asked = new Set(), want = 'any') {
   if (cfg && !cfg.settings && cfg.strength !== undefined) cfg = DEFAULTS; // старый вызов (prefs вместо cfg)
   const st = (cfg || DEFAULTS).settings;
   const step = st.share_step;
+  const off = candidates.offTaste || new Set();
   const res = [];
   const usedAll = new Set();
   for (const m of (out && Array.isArray(out.mixes) ? out.mixes : []).slice(0, 3)) {
@@ -1668,9 +1727,13 @@ export function validateMixes(out, candidates, cfg = DEFAULTS, asked = new Set()
     if (parts[0].p <= 0) continue;
     parts.sort((a, b) => b.p - a.p);
     parts = withBase(parts, st.base_share, step, Math.max(2, st.min_tobaccos));
+    const avg = avgStrength(parts, st.strong_words);
     parts.forEach((p) => usedAll.add(p.item.k));
 
-    const sNum = Math.round(Number(m.strength));
+    const sAi = Math.round(Number(m.strength));
+    // ИИ назвал крепость, которой в миксе нет (подогнал под просьбу), — показываем честную, посчитанную по долям.
+    const sCalc = mixStrength(parts, st.strong_words);
+    const sNum = (want === 'strong' && sAi > sCalc) || (want === 'light' && sAi < sCalc) || Math.abs(sAi - sCalc) > 1 ? sCalc : sAi;
     res.push({
       title: String(m.title || 'Микс').slice(0, 60),
       text: String(m.text || '').slice(0, 700),
@@ -1678,6 +1741,9 @@ export function validateMixes(out, candidates, cfg = DEFAULTS, asked = new Set()
       strength: sNum >= 1 && sNum <= 5 ? sNum : mixStrength(parts, st.strong_words),
       garnish: typeof m.garnish === 'string' ? m.garnish.slice(0, 200) : '',
       parts,
+      // Узкий случай: клиент просил конкретный вкус и крепко, а этот вкус есть только в более лёгком табаке — микс вышел мягче просьбы.
+      // Тогда под миксами будет одна строка про крепкую основу. Во всех остальных случаях ничего не пишем.
+      softer: want === 'strong' && avg < STRONG_FROM && parts.some((p) => off.has(p.item.k) && effStrength(p.item, st.strong_words) <= 3),
     });
   }
   return res;
