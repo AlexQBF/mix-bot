@@ -58,6 +58,8 @@ export const DEFAULT_TEXTS = {
     'Фразы, которые сменяют друг друга, пока бот думает. Разделяются знаком |'],
   strength_remembered: ['{s} — как ты любишь. Хочешь поменять — скажи.', '{s}՝ ինչպես սիրում ես։ Ուզում ես փոխել՝ ասա։',
     'Под «Подбираю миксы…», если бот взял крепость из прошлого запроса'],
+  strength_default: ['⚖️ Средняя крепость. Хочешь поменять — скажи.', '⚖️ Միջին թնդություն։ Ուզում ես փոխել՝ ասա։',
+    'Строка в «загрузке»: новый запрос без крепости после того, как клиент менял крепость прошлого подбора'],
   strength_tip: ['💡 Эти вкусы — из лёгкой линейки, поэтому миксы вышли мягче, чем ты просил. Хочешь покрепче — возьми к ним крепкую основу {base} и добавь в чашу по вкусу.',
     '💡 Այս համերը թեթև շարքից են, դրա համար միքսերը խնդրածից մեղմ են ստացվել։ Ուզում ես ավելի թունդ՝ վերցրու թունդ հիմք {base} և ավելացրու գլխիկին ըստ ճաշակի։',
     'Строка под миксами, если нужный клиенту вкус есть только в лёгком табаке и миксы вышли легче, чем он просил. {base} — крепкая основа из наличия'],
@@ -594,6 +596,7 @@ export function tx(cfg, lang = 'ru') {
     tellFirst: g('tell_first'), noCatalog: g('no_catalog'), picking: g('picking'), pickingMore: g('picking_more'),
     progress: g('progress').split('|').map((x) => x.trim()).filter(Boolean),
     strengthRemembered: (s) => fill(g('strength_remembered'), { s }),
+    strengthDefault: g('strength_default'),
     outOfStock: (name) => fill(g('out_of_stock'), { name }),
     strengthTip: (base) => (base ? fill(g('strength_tip'), { base }) : g('strength_tip_nobase')),
     tooFew: g('too_few'), failed: g('failed'), more: g('btn_more'), newReq: g('btn_new'), stronger: g('btn_stronger'), lighter: g('btn_lighter'),
@@ -1041,6 +1044,7 @@ async function onText(env, msg, ctx) {
   const prefs = await extractPrefs(env, request, force ? '' : prev);
   if (!prefs.relevant) return send(env, chat, t.notRelevant);
   let carry = prev && prefs.followup ? { used: session.used || [], titles: session.titles || [] } : { used: [], titles: [] };
+  let base = prev && prefs.followup ? session : null; // прошлый подбор, если это его уточнение
   if (prev && prefs.followup) request = (prev + '\n' + text).slice(-1500);
   // Страховка: в сообщении нет ни одного вкуса, табака или бренда — только крепость («легкая креепость»), а прошлый запрос есть.
   // Значит, клиент уточняет прошлый запрос: берём его вкусы целиком и меняем только крепость. Иначе бот «забывает» пломбир.
@@ -1052,10 +1056,26 @@ async function onText(env, msg, ctx) {
       flavors: keep.flavors || [], brands: keep.brands || [], other_brands: keep.other_brands || [], followup: true });
     request = (String(last.text) + '\n' + text).slice(-1500);
     carry = { used: last.used || [], titles: last.titles || [] };
+    base = last;
   }
+  // Чья крепость.
+  // Уточнение прошлого подбора («а без мяты?», «полегче», кнопки «Покрепче» / «Полегче») — крепость относится к этому подбору:
+  // держим её, пока клиент уточняет, но «как ты любишь» из неё не делаем.
+  // Новый запрос без крепости после таких уточнений — средняя по умолчанию: клиент уже не помнит, что там накрутил.
+  // «Как ты любишь» — только то, что клиент сам назвал в новом запросе или выбрал кнопкой на вопрос «Как крепко?».
   let note = '';
+  let tuned = false; // крепость подбора меняли уточнениями
+  const played = !force && !base && session && session.stage === 'done' && session.tuned;
   if (prefs.strength !== 'unknown') {
-    await rememberStrength(env, chat, prefs.strength); // назвал сам — запоминаем
+    if (base) { tuned = true; await env.KV.delete('strength:' + chat).catch(() => {}); }
+    else await rememberStrength(env, chat, prefs.strength); // назвал сам в новом запросе — запоминаем
+  } else if (base && base.prefs && STRENGTHS.includes(base.prefs.strength)) {
+    prefs.strength = base.prefs.strength;
+    tuned = !!base.tuned;
+  } else if (played) {
+    prefs.strength = 'medium';
+    tuned = true; // и дальше, пока клиент сам не назовёт крепость, — средняя
+    note = t.strengthDefault;
   } else if (!force) {
     const remembered = await recallStrength(env, chat);
     if (remembered) {
@@ -1068,11 +1088,11 @@ async function onText(env, msg, ctx) {
     }
   }
   if (prefs.strength === 'unknown') prefs.strength = 'any';
-  await makeMixes(env, chat, { text: request, prefs, ...carry }, false, lang, note, t0);
+  await makeMixes(env, chat, { text: request, prefs, ...carry, ...(tuned ? { tuned: true } : {}) }, false, lang, note, t0);
 }
 
 /** /config — коротко, что сейчас действует. */
-const CODE_VERSION = '12.34 · 45 (картинка и текст снова двумя сообщениями; новая карточка, заказ в одно касание, «Покрепче» / «Полегче»)';
+const CODE_VERSION = '12.36 · 47 (приписка «Средняя крепость»; новый запрос после «Покрепче» / «Полегче» — средняя; кнопки крепости от показанных миксов)';
 export function configSummary(cfg, env = {}, stock = null) {
   const at = cfg._at ? new Date(cfg._at).toLocaleString('ru-RU', { timeZone: 'Europe/Moscow', day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) + ' МСК' : 'ещё не загружалась — работают значения из кода';
   const s = cfg.settings;
@@ -1151,18 +1171,23 @@ async function onCallback(env, cq, ctx) {
     await logToSheet(env, ctx, { action: 'strength', userId: (cq.from && cq.from.id) || chat, strength: STRENGTH_LOG[session.prefs.strength] || session.prefs.strength });
     return makeMixes(env, chat, { text: session.text, prefs: session.prefs, used: [], titles: [] }, false, lang);
   }
-  if (data === 'adj:up' || data === 'adj:down') {
-    // «Покрепче» / «Полегче»: те же вкусы, крепость на ступень в нужную сторону (лёгкая → средняя → крепкая).
+  if (data.startsWith('adj:')) {
+    // «Покрепче» / «Полегче»: те же вкусы, другая крепость. Куда именно шагнуть, записано в самой кнопке (см. strengthSteps).
     if (!session.prefs || session.stage === 'ask_strength') return send(env, chat, t.tellFirst);
     const shown = mixesFromMessage(cq.message.text || cq.message.caption).map((m) => m.title.toLocaleUpperCase('ru'));
     const known = (session.titles || []).map((x) => String(x).toLocaleUpperCase('ru'));
     await keepOrderButtons(env, cq.message);
     if (shown.length && !shown.some((x) => known.includes(x))) return send(env, chat, t.expired);
-    const up = data === 'adj:up', cur = session.prefs.strength;
-    session.prefs.strength = up ? (cur === 'light' ? 'medium' : 'strong') : (cur === 'strong' ? 'medium' : 'light');
+    const m = data.match(/^adj:([+-])(light|medium|strong)$/);
+    const cur = session.prefs.strength;
+    const up = m ? m[1] === '+' : data === 'adj:up';
+    // Кнопки из версий 12.33–12.34 («adj:up» / «adj:down») — шаг от запрошенной крепости.
+    session.prefs.strength = m ? m[2] : up ? (cur === 'light' ? 'medium' : 'strong') : (cur === 'strong' ? 'medium' : 'light');
     // Прошлые нажатия этих кнопок из запроса убираем — в нём остаётся одно, последнее уточнение.
     session.text = (String(session.text || '').replace(/(\n(?:покрепче|полегче))+$/, '') + '\n' + (up ? 'покрепче' : 'полегче')).slice(-1500);
-    await rememberStrength(env, chat, session.prefs.strength);
+    // Это уточнение одного подбора, а не «как ты любишь»: запомненную крепость стираем, новый запрос начнётся со средней.
+    session.tuned = true;
+    await env.KV.delete('strength:' + chat).catch(() => {});
     await logToSheet(env, ctx, { action: 'strength', userId: (cq.from && cq.from.id) || chat, strength: STRENGTH_LOG[session.prefs.strength] || session.prefs.strength });
     return makeMixes(env, chat, session, false, lang);
   }
@@ -1223,14 +1248,30 @@ async function keepOrderButtons(env, msg) {
   await tg(env, 'editMessageReplyMarkup', { chat_id: msg.chat.id, message_id: msg.message_id, reply_markup: { inline_keyboard: keep } }).catch(() => {});
 }
 
+const LEVELS = ['light', 'medium', 'strong'];
+/**
+ * Куда ведут «Покрепче» и «Полегче» под подбором. Считаем от того, что клиент видит, а не только от того, что он просил:
+ * просил крепко, а миксы вышли средними (вкус есть только в лёгком табаке) — «Полегче» ведёт сразу в лёгкие,
+ * а «Покрепче» не показываем: крепче с этим вкусом не собрать. Нет шага — нет кнопки.
+ */
+export function strengthSteps(requested, mixes = []) {
+  const nums = mixes.map((m) => m.strength).filter((x) => typeof x === 'number' && x >= 1 && x <= 5);
+  const avg = nums.length ? nums.reduce((a, b) => a + b, 0) / nums.length : 0;
+  const act = !avg ? -1 : avg < 2.5 ? 0 : avg < STRONG_FROM ? 1 : 2;
+  const req = LEVELS.indexOf(requested);
+  if (req < 0 && act < 0) return { up: 'strong', down: 'light' };
+  const hi = Math.max(req, act), lo = req < 0 ? act : act < 0 ? req : Math.min(req, act);
+  return { up: hi < 2 ? LEVELS[hi + 1] : null, down: lo > 0 ? LEVELS[lo - 1] : null };
+}
+
 /**
  * Кнопки под подбором: миксы (нажатие сразу открывает чат с менеджером, текст заказа уже вписан),
- * быстрые уточнения «Покрепче» / «Полегче» / «Ещё» и «Новый запрос». Крепче крепкого и легче лёгкого кнопок нет.
+ * быстрые уточнения «Покрепче» / «Полегче» / «Ещё» и «Новый запрос». steps — куда ведут кнопки крепости (strengthSteps).
  */
-function resultKeyboard(t, orders = [], strength = 'any') {
+function resultKeyboard(t, orders = [], steps = {}) {
   const quick = [
-    ...(strength !== 'strong' ? [{ text: t.stronger, callback_data: 'adj:up' }] : []),
-    ...(strength !== 'light' ? [{ text: t.lighter, callback_data: 'adj:down' }] : []),
+    ...(steps.up ? [{ text: t.stronger, callback_data: 'adj:+' + steps.up }] : []),
+    ...(steps.down ? [{ text: t.lighter, callback_data: 'adj:-' + steps.down }] : []),
     { text: t.more, callback_data: 'more' },
   ];
   return { inline_keyboard: [
@@ -1372,7 +1413,7 @@ async function makeMixes(env, chat, session, more = false, lang = 'ru', note = '
     ? '\n\n' + esc(t.strengthTip(bst ? `${bst.b}${bst.l && bst.l !== 'Основная' ? ' ' + bst.l : ''} ${bst.n}` : '')) : '';
   const text = gone + result.map((m, i) => renderMix(m, i, t, result.length, bowl)).join('\n\n') + tip +
     '\n\n' + (orders.length ? t.orderHint : t.footer + (shop ? ' ' + shop : ''));
-  const kb = resultKeyboard(t, orders, session.prefs.strength);
+  const kb = resultKeyboard(t, orders, strengthSteps(session.prefs.strength, result));
   const sendMixes = () => send(env, chat, text, kb);
   const ti = Date.now();
   if (cfg.settings.images && cfg.settings.image_first) {
