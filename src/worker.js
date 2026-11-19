@@ -71,6 +71,7 @@ export const DEFAULT_TEXTS = {
   picking_more: ['🔄 Думаю над другими вариантами…', '🔄 Մտածում եմ այլ տարբերակների մասին…', 'После кнопки «Ещё варианты»'],
   gram: ['г', 'գ', 'Сокращение «грамм» в составе микса'],
   strength_label: ['Крепость:', 'Թնդություն՝', 'Подпись перед крепостью микса'],
+  strength_word: ['крепость', 'թնդություն', 'Слово перед точками крепости в строке названия: «НАЗВАНИЕ, крепость ●●○○○»'],
   strength_1: ['лёгкая', 'թեթև', 'Крепость микса'],
   strength_2: ['средне-лёгкая', 'միջին-թեթև', 'Крепость микса'],
   strength_3: ['средняя', 'միջին', 'Крепость микса'],
@@ -600,7 +601,7 @@ export function tx(cfg, lang = 'ru') {
     outOfStock: (name) => fill(g('out_of_stock'), { name }),
     strengthTip: (base) => (base ? fill(g('strength_tip'), { base }) : g('strength_tip_nobase')),
     tooFew: g('too_few'), failed: g('failed'), more: g('btn_more'), newReq: g('btn_new'), stronger: g('btn_stronger'), lighter: g('btn_lighter'),
-    strengthLabel: g('strength_label'),
+    strengthLabel: g('strength_label'), strengthWord: g('strength_word'),
     strengthNames: ['', g('strength_1'), g('strength_2'), g('strength_3'), g('strength_4'), g('strength_5')],
     gram: g('gram'), packNote: (w) => fill(g('pack_note'), { g: w }), packOne: (w) => fill(g('pack_one'), { g: w }), orderHint: g('order_hint'), orderReady: (name) => fill(g('order_ready'), { name }), orderOpen: g('order_open'), noSwear: g('no_swear'), orderBtn: (name) => fill(g('order_btn'), { name }), orderText: (name) => fill(g('order_text'), { name }), packMany: (w) => fill(g('pack_many'), { g: w }), bowlNote: (gr) => fill(g('bowl_note'), { g: gr }), footer: g('footer'),
     llmLang: lang === 'hy' ? 'армянском (восточноармянский литературный, армянским алфавитом)' : 'русском',
@@ -1092,7 +1093,7 @@ async function onText(env, msg, ctx) {
 }
 
 /** /config — коротко, что сейчас действует. */
-const CODE_VERSION = '12.36 · 47 (приписка «Средняя крепость»; новый запрос после «Покрепче» / «Полегче» — средняя; кнопки крепости от показанных миксов)';
+const CODE_VERSION = '12.37 · 48 (в строке названия — «, крепость ●●○○○»)';
 export function configSummary(cfg, env = {}, stock = null) {
   const at = cfg._at ? new Date(cfg._at).toLocaleString('ru-RU', { timeZone: 'Europe/Moscow', day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) + ' МСК' : 'ещё не загружалась — работают значения из кода';
   const s = cfg.settings;
@@ -1226,7 +1227,7 @@ export function mixesFromMessage(text) {
       return { p: Number(m[1]), name: seg[0].trim(), brand: (seg[1] || '').trim(), w: w ? Number(w[0]) : 0 };
     });
     // Название — без эмодзи в начале и точек крепости в конце.
-    return parts.length ? { title: lines[0].replace(/[●○]+/g, '').replace(/^[^\p{L}\p{N}]+/u, '').trim(), parts } : null;
+    return parts.length ? { title: lines[0].replace(STRENGTH_TAIL, '').replace(/[●○]+/g, '').replace(/^[^\p{L}\p{N}]+/u, '').trim(), parts } : null;
   }).filter(Boolean);
 }
 
@@ -1249,6 +1250,8 @@ async function keepOrderButtons(env, msg) {
 }
 
 const LEVELS = ['light', 'medium', 'strong'];
+// Хвост строки названия: «, крепость ●●○○○» (на любом из языков бота) — в само название не входит.
+const STRENGTH_TAIL = new RegExp(',\\s*(?:' + DEFAULT_TEXTS.strength_word.slice(0, 2).join('|') + ')\\s*[●○]+\\s*$', 'i');
 /**
  * Куда ведут «Покрепче» и «Полегче» под подбором. Считаем от того, что клиент видит, а не только от того, что он просил:
  * просил крепко, а миксы вышли средними (вкус есть только в лёгком табаке) — «Полегче» ведёт сразу в лёгкие,
@@ -1918,7 +1921,9 @@ export function renderMix(m, i, t = 'ru', total = 3, bowl = 20) {
   });
   // Крепость — пятью точками в строке названия: ●●○○○. Если числа нет (старые данные) — словами отдельной строкой.
   const n = typeof m.strength === 'number' && m.strength >= 1 && m.strength <= 5 ? m.strength : 0;
-  const dots = n ? '\u2002' + '●'.repeat(n) + '○'.repeat(5 - n) : '';
+  // «НАЗВАНИЕ, крепость ●●○○○». Между словом и точками — неразрывный пробел: если строка не влезла,
+  // на вторую строку уходит «крепость ●●○○○» целиком, а не одни точки.
+  const dots = n ? `, ${esc(t.strengthWord)}\u00A0${'●'.repeat(n)}${'○'.repeat(5 - n)}` : '';
   const words = !n && m.strength ? '\n' + t.strengthLabel + ' ' + esc(m.strength) : '';
   return (
     `${m.emoji ? m.emoji + ' ' : ''}<b>${esc(m.title.toLocaleUpperCase(t.lang === 'hy' ? 'hy' : 'ru'))}</b>${dots}\n` +
