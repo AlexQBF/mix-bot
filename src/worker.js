@@ -33,17 +33,12 @@ const NO = ['нет', 'no', 'n', '0', '-', 'выкл', 'off', 'false', 'ոչ', '
 // <b>жирный</b>, <i>курсив</i>; {i}, {n}, {g} — подставляемые числа.
 export const DEFAULT_TEXTS = {
   hello: [
-    'Привет! Я <b>Sigma Mix</b>, твой карманный кальянщик 💨\n\n' +
-    'Напиши что нравится: <i>«хочу ягодное с кислинкой»</i>, <i>«люблю Deus»</i>, <i>«чтобы освежало, но не мята»</i>.\n\n' +
-    'Подберу 3 микса с пропорциями и описанием.\n' +
-    'Понравилось - бери табачок у нас в VektorSIGMA 🛒\n\n' +
-    '<i>Строго 18+</i>',
-    'Բարև՛։ Ես <b>Sigma Mix</b>-ն եմ՝ քո գրպանի կալյանի վարպետը 💨\n\n' +
-    'Գրիր, թե ինչ է քեզ դուր գալիս՝ <i>«ուզում եմ հատապտղային՝ թթվաշությամբ»</i>, <i>«սիրում եմ Deus»</i>, <i>«որ թարմացնի, բայց ոչ անանուխ»</i>։\n\n' +
-    'Կընտրեմ 3 միքս՝ համամասնություններով և նկարագրությամբ։\n' +
-    'Հավանեցի՞ր՝ ծխախոտը գնիր մեզ մոտ՝ VektorSIGMA-ում 🛒\n\n' +
-    '<i>Խիստ 18+</i>',
-    'Приветствие после /start (показываются оба языка подряд)'],
+    'Привет! Я <b>Sigma Mix</b> — подберу кальянные миксы из табаков VektorSIGMA 💨\n' +
+    'Напиши, чего хочется, например, <i>«кислый ягодный микс»</i>, <i>«гастрономия»</i>, <i>«хочу десертное»</i>.',
+    'Բարև՛։ Ես <b>Sigma Mix</b>-ն եմ՝ կընտրեմ կալյանի միքսեր VektorSIGMA-ի ծխախոտներից 💨\n' +
+    'Գրիր, թե ինչ ես ուզում, օրինակ՝ <i>«թթու հատապտղային միքս»</i>, <i>«գաստրոնոմիա»</i>, <i>«ուզում եմ աղանդերային»</i>։',
+    'Приветствие после /start (показываются оба языка подряд, без кнопок)'],
+  hello_langs: ['<i>18+</i>', '<i>18+</i>', 'Последняя строка приветствия (одна на оба языка)'],
   choose_lang: ['Выбери язык 👇', 'Ընտրիր լեզուն 👇', 'Под приветствием и по команде /language, над кнопками языка'],
   lang_set: ['Отлично, общаемся по-русски 🇷🇺\nНапиши, что тебе нравится, — подберу миксы.',
     'Հիանալի՛, խոսում ենք հայերեն 🇦🇲\nԳրիր, թե ինչ է քեզ դուր գալիս, և ես միքսեր կընտրեմ։', 'После выбора языка'],
@@ -77,6 +72,9 @@ export const DEFAULT_TEXTS = {
   strength_3: ['средняя', 'միջին', 'Крепость микса'],
   strength_4: ['средне-крепкая', 'միջին-թունդ', 'Крепость микса'],
   strength_5: ['крепкая', 'թունդ', 'Крепость микса'],
+  noaroma_none: ['Безаромного табака сейчас нет в наличии — миксы без него.', 'Առանց բույրի ծխախոտ հիմա չկա պահեստում․ միքսերն առանց դրա են։', 'Клиент попросил добавить безаромку, а её нет на складе'],
+  noaroma_absent: ['В этих миксах безаромки и так нет 👆', 'Այս միքսերում առանց բույրի ծխախոտ առանց այն էլ չկա 👆', 'Клиент попросил убрать безаромку, а её в составе нет'],
+  noaroma_already: ['Безаромка уже есть в этих миксах 👆', 'Առանց բույրի ծխախոտն արդեն կա այս միքսերում 👆', 'Клиент попросил добавить безаромку, а она уже в составе'],
   no_swear: ['Давай без мата 🙂 Напиши то же самое спокойно — и я подберу миксы.', 'Խնդրում եմ առանց հայհոյանքների 🙂 Գրիր նույնը հանգիստ, և ես միքսեր կընտրեմ։', 'Ответ на сообщение с матом'],
   order_hint: ['Какой берём? 👇', 'Ո՞րն ենք վերցնում 👇', 'Строка перед кнопками миксов: нажатие открывает чат с менеджером с готовым текстом заказа'],
   order_ready: ['Заказ на «{name}» готов. Нажми кнопку — откроется чат с менеджером, текст уже вписан, останется отправить 👇', '«{name}» պատվերը պատրաստ է։ Սեղմիր կոճակը՝ կբացվի զրույց մենեջերի հետ, տեքստն արդեն գրված է, մնում է ուղարկել 👇',
@@ -142,6 +140,8 @@ export const DEFAULT_SETTINGS = [
   { key: 'badge_overlay', def: 'да', type: 'yesno', desc: 'Добавлять на картинку значок магазина в левый верхний угол (файл src/badge.png) (да / нет). Работает вместе с logo_overlay.' },
   { key: 'strength_memory_hours', def: '3', type: 'int', min: 0, max: 72,
     desc: 'Сколько часов бот помнит выбранную клиентом крепость и не переспрашивает в следующих запросах. 0 — спрашивать каждый раз.' },
+  { key: 'noaroma_share', def: '20', type: 'int', min: 5, max: 50,
+    desc: 'Сколько безаромного табака (No Aroma) класть в микс, когда клиент сам попросил «добавь безаромку», %. Остальные табаки ужимаются пропорционально.' },
   { key: 'show_rating', def: 'да', type: 'yesno',
     desc: 'Показывать у каждого табака в миксе рейтинг с htreviews — (4.5★); нажатие на него открывает страницу табака на htreviews (да / нет). У табаков без оценок и у вкусов, которых нет на htreviews, рейтинг не показывается.' },
   { key: 'prefer_small_packs', def: 'да', type: 'yesno',
@@ -595,14 +595,14 @@ export function tx(cfg, lang = 'ru') {
   const g = (k) => (cfg.texts[k] && cfg.texts[k][lang]) || DEFAULT_TEXTS[k][lang === 'hy' ? 1 : 0];
   return {
     lang,
-    hello: g('hello'), chooseLang: g('choose_lang'), langSet: g('lang_set'), askStrength: g('ask_strength'),
+    hello: g('hello'), helloLangs: g('hello_langs'), chooseLang: g('choose_lang'), langSet: g('lang_set'), askStrength: g('ask_strength'),
     strength: [g('btn_light'), g('btn_medium'), g('btn_strong'), g('btn_any')],
     notRelevant: g('not_relevant'), notText: g('not_text'), error: g('error'), restart: g('restart'), expired: g('expired'),
     tellFirst: g('tell_first'), noCatalog: g('no_catalog'), picking: g('picking'), pickingMore: g('picking_more'),
     progress: g('progress').split('|').map((x) => x.trim()).filter(Boolean),
     strengthRemembered: (s) => fill(g('strength_remembered'), { s }),
     strengthDefault: g('strength_default'),
-    outOfStock: (name) => fill(g('out_of_stock'), { name }),
+    outOfStock: (name) => fill(g('out_of_stock'), { name }), noAromaNone: g('noaroma_none'), noAromaAlready: g('noaroma_already'), noAromaAbsent: g('noaroma_absent'),
     strengthTip: (base) => (base ? fill(g('strength_tip'), { base }) : g('strength_tip_nobase')),
     tooFew: g('too_few'), failed: g('failed'), more: g('btn_more'), newReq: g('btn_new'), stronger: g('btn_stronger'), lighter: g('btn_lighter'),
     strengthLabel: g('strength_label'), strengthWord: g('strength_word'),
@@ -614,7 +614,6 @@ export function tx(cfg, lang = 'ru') {
 const txt = async (env, lang) => tx(await loadConfig(env), lang);
 const fill = (s, vars) => String(s).replace(/\{(\w+)\}/g, (m, k) => (k in vars ? vars[k] : m));
 
-const LANG_SEPARATOR = '\n\n————————————\n\n';
 const SOURCE = 'https://htreviews.org';
 const PAGE = 20; // сайт сам грузит по 20, большие порции отдают неполный список
 const STRENGTH = { 'лёгкая': 1, 'легкая': 1, 'средне-лёгкая': 2, 'средне-легкая': 2, 'средняя': 3, 'средне-крепкая': 4, 'крепкая': 5 };
@@ -933,7 +932,11 @@ async function onText(env, msg, ctx) {
     await env.KV.delete('s:' + chat);
     await env.KV.delete('strength:' + chat); // начать заново — и крепость спросим заново
     const ru = await txt(env, 'ru'), hy = await txt(env, 'hy');
-    return send(env, chat, ru.hello + LANG_SEPARATOR + hy.hello + '\n\n' + ru.chooseLang + ' ' + hy.chooseLang, langKeyboard());
+    // Язык не спрашиваем: бот отвечает на том языке, на котором пишет клиент (см. detectLang ниже).
+    // До первого сообщения — по языку приложения Telegram у клиента: армянский → армянский, иначе русский.
+    const first = !(await env.KV.get('lang:' + chat).catch(() => null));
+    if (first && /^hy/i.test(String((msg.from && msg.from.language_code) || ''))) await setLang(env, chat, 'hy');
+    return send(env, chat, ru.hello + '\n\n' + hy.hello + '\n\n' + ru.helloLangs);
   }
   if (cmd === '/language' || cmd === '/lang') {
     const ru = await txt(env, 'ru'), hy = await txt(env, 'hy');
@@ -1034,25 +1037,55 @@ async function onText(env, msg, ctx) {
   const t = await txt(env, lang);
 
   const session = await getSession(env, chat);
-  let request = text;
+  const t0 = Date.now();
+  // «Давай добавим безаромку» (или «убери безаромку») — это не новый вкус, а доработка показанных миксов:
+  // те же три микса, плюс безаромный табак в каждом. ИИ для этого не нужен, считаем сами.
+  // Понять просьбу можно двумя путями: по частым словам («безаромка», «no aroma») — сразу, без ИИ;
+  // всё остальное («добавь основу», «табак без вкуса», опечатки) понимает ИИ при разборе сообщения — см. ниже.
+  const na = noAromaAsk(text);
+  const canRework = !!(session && session.stage === 'done' && session.prefs);
+  const rework = async (remove) => {
+    if (session.last && await reworkNoAroma(env, chat, session, lang, remove, t0)) return;
+    // Прошлые миксы восстановить не получилось (поменялось наличие) — собираем заново по тому же запросу.
+    session.prefs = { ...session.prefs, noaroma: !remove };
+    return makeMixes(env, chat, session, false, lang, '', t0);
+  };
+  if (na && na.pure && canRework) {
+    await action(env, chat, 'typing');
+    return rework(na.remove);
+  }
+  // Просьба про безаромку вместе с чем-то ещё («клубника с безаромкой») — в разбор вкусов идёт текст без неё:
+  // иначе ИИ принимает её за табачный вкус. Саму безаромку добавит код.
+  const said = na ? na.rest || text : text;
+  let request = said;
   let force = false;
   if (session && session.stage === 'ask_strength') {
-    request = session.text + '\n' + text; // ответ на уточняющий вопрос
+    request = session.text + '\n' + said; // ответ на уточняющий вопрос
     force = true;
     if (session.askId) await tg(env, 'deleteMessage', { chat_id: chat, message_id: session.askId }).catch(() => {});
   }
   await action(env, chat, 'typing');
-  const t0 = Date.now();
   // Продолжение разговора: «то же самое, только лёгкое», «а без мяты?». Показываем разбору прошлый запрос —
   // он сам решает, продолжение это или новая тема. Кнопка «Новый запрос» прошлый запрос стирает.
   // Прошлый запрос подключаем, только если новое сообщение само похоже на продолжение («то же, но легче», «а без мяты?»).
   // Самостоятельная просьба («джин с огурцом») всегда разбирается с нуля — иначе к ней прилипают вкусы из прошлого запроса.
-  const prev = session && session.stage === 'done' && session.text && looksLikeFollowup(text) ? String(session.text) : '';
+  const prev = session && session.stage === 'done' && session.text && looksLikeFollowup(said) ? String(session.text) : '';
   const prefs = await extractPrefs(env, request, force ? '' : prev);
+  // Безаромка: что сказали ключевые слова, а если их не было — как понял ИИ.
+  const naMode = na ? (na.remove ? 'remove' : 'add') : prefs.na;
+  delete prefs.na;
+  if (naMode) { // сам безаромный табак — не вкус: ни в «хочу», ни в «не хочу» ему не место
+    const notTaste = (x) => !/^(табак|табач|безаром|основ|баз[аы]?$|нейтральн|no\s*aroma)/i.test(x);
+    prefs.like = prefs.like.filter(notTaste);
+    prefs.avoid = prefs.avoid.filter(notTaste);
+  }
+  // В сообщении только эта просьба, а миксы уже показаны — дорабатываем их, новые не подбираем.
+  const onlyNoAroma = !!naMode && !prefs.like.length && !prefs.flavors.length && !prefs.brands.length && !prefs.avoid.length && prefs.strength === 'unknown';
+  if (onlyNoAroma && canRework && !force) return rework(naMode === 'remove');
   if (!prefs.relevant) return send(env, chat, t.notRelevant);
   let carry = prev && prefs.followup ? { used: session.used || [], titles: session.titles || [] } : { used: [], titles: [] };
   let base = prev && prefs.followup ? session : null; // прошлый подбор, если это его уточнение
-  if (prev && prefs.followup) request = (prev + '\n' + text).slice(-1500);
+  if (prev && prefs.followup) request = (prev + '\n' + said).slice(-1500);
   // Страховка: в сообщении нет ни одного вкуса, табака или бренда — только крепость («легкая креепость»), а прошлый запрос есть.
   // Значит, клиент уточняет прошлый запрос: берём его вкусы целиком и меняем только крепость. Иначе бот «забывает» пломбир.
   const noTaste = !prefs.like.length && !prefs.flavors.length && !prefs.brands.length;
@@ -1061,10 +1094,12 @@ async function onText(env, msg, ctx) {
     const keep = last.prefs;
     Object.assign(prefs, { like: keep.like || [], avoid: [...new Set([...(keep.avoid || []), ...prefs.avoid])], groups: keep.groups || [],
       flavors: keep.flavors || [], brands: keep.brands || [], other_brands: keep.other_brands || [], followup: true });
-    request = (String(last.text) + '\n' + text).slice(-1500);
+    request = (String(last.text) + '\n' + said).slice(-1500);
     carry = { used: last.used || [], titles: last.titles || [] };
     base = last;
   }
+  // Безаромка: попросил сейчас — добавляем; уточняет подбор, где она уже была, — оставляем; попросил убрать — убираем.
+  if (naMode ? naMode === 'add' : !!(base && base.prefs && base.prefs.noaroma)) prefs.noaroma = true;
   // Чья крепость.
   // Уточнение прошлого подбора («а без мяты?», «полегче», кнопки «Покрепче» / «Полегче») — крепость относится к этому подбору:
   // держим её, пока клиент уточняет, но «как ты любишь» из неё не делаем.
@@ -1099,7 +1134,7 @@ async function onText(env, msg, ctx) {
 }
 
 /** /config — коротко, что сейчас действует. */
-const CODE_VERSION = '12.41 · 52 (готовое сообщение менеджеру: список табаков и «Подскажите, есть в наличии?», без названия микса)';
+const CODE_VERSION = '12.46 · 57 (приветствие: правка формулировок)';
 export function configSummary(cfg, env = {}, stock = null) {
   const at = cfg._at ? new Date(cfg._at).toLocaleString('ru-RU', { timeZone: 'Europe/Moscow', day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) + ' МСК' : 'ещё не загружалась — работают значения из кода';
   const s = cfg.settings;
@@ -1412,9 +1447,25 @@ async function makeMixes(env, chat, session, more = false, lang = 'ru', note = '
   tm.compose = Date.now() - tc;
   if (!result.length) { await progress.stop(false); return send(env, chat, t.failed, resultKeyboard(t)); }
 
+  // Клиент просил безаромку — добавляем её в каждый микс сами (ИИ собирал миксы без неё).
+  let lead = '';
+  if (session.prefs.noaroma) {
+    const r = applyNoAroma(result, catalog, cfg, lang);
+    result = r.mixes;
+    if (!r.found && !session.naTold) { lead = t.noAromaNone; session.naTold = true; }
+  }
+  return deliver(env, chat, session, result, { cfg, t, more, progress, booster: candidates.booster, lead, tm, t0 });
+}
+
+/**
+ * Отправить готовые миксы клиенту: картинка, текст, кнопки — и запомнить подбор в диалоге.
+ * Общий хвост для обычного подбора и для доработки показанных миксов (безаромка).
+ */
+async function deliver(env, chat, session, result, { cfg, t, more = false, progress, booster = null, lead = '', tm = {}, t0 = Date.now() }) {
   session.stage = 'done';
   session.used = [...(session.used || []), ...result.flatMap((m) => m.parts.map((p) => p.item.k))].slice(-80);
-  session.titles = [...(session.titles || []), ...result.map((m) => m.title)].slice(-15);
+  session.titles = [...new Set([...(session.titles || []), ...result.map((m) => m.title)])].slice(-15);
+  session.last = packMixes(result); // состав показанных миксов: по нему дорабатываем их без ИИ
   // Кнопки миксов — прямые ссылки в чат с менеджером (заказ в одно касание), в диалоге их хранить не нужно.
   const orders = orderButtons(result, t, cfg.settings.order_contact);
   delete session.orders;
@@ -1425,8 +1476,8 @@ async function makeMixes(env, chat, session, more = false, lang = 'ru', note = '
 
   const shop = cfg.settings.shop_url;
   // Одной строкой перед миксами: чего нет в наличии. Дальше миксы как обычно, без оговорок в описаниях.
-  const gone = tellGone ? esc(t.outOfStock(session.missing.map((m) => m.name).join(', '))) + '\n\n' : '';
-  const bst = candidates.booster;
+  const gone = (tellGone ? esc(t.outOfStock(session.missing.map((m) => m.name).join(', '))) + '\n\n' : '') + (lead ? esc(lead) + '\n\n' : '');
+  const bst = booster;
   const tip = result.some((m) => m.softer)
     ? '\n\n' + esc(t.strengthTip(bst ? `${bst.b}${bst.l && bst.l !== 'Основная' ? ' ' + bst.l : ''} ${bst.n}` : '')) : '';
   const text = gone + result.map((m, i) => renderMix(m, i, t, { rating: cfg.settings.show_rating })).join('\n\n') + tip +
@@ -1461,6 +1512,138 @@ async function makeMixes(env, chat, session, more = false, lang = 'ru', note = '
     await reportProblem(env, 'slow', `🐢 Клиент ждал миксы ${sec(tm.text)} с: разбор запроса ${sec(tm.parse)} с, сборка миксов ${sec(tm.compose)} с, ` +
       `картинка ${sec(tm.image)} с (весь ответ ${sec(total)} с).`);
   }
+}
+
+/* ───── Безаромка: табак без ароматизатора, который клиент просит добавить в миксы ───── */
+
+const NOAROMA_ASK_RE = /(безаром[а-я]*|без\s*аром(?:к|ок)[а-я]*|no[\s-]*aroma|ноу?\s*арома|чист[а-я]*\s+табак[а-я]*)/;
+const NOAROMA_ITEM_RE = /no[\s-]*aroma|без\s*аромат|безаром/i;
+// Слова, которые сами по себе ничего не просят: «давай добавим … в них, пожалуйста».
+const NOAROMA_FILLER = /^(давай(те)?|добав\S*|докин\S*|закин\S*|вкин\S*|кин\S*|туда|сюда|еще|немного|чуть|чуток|пожалуйста|плиз|можно|можешь|в|во|к|ко|на|них|него|нее|ним|нему|и|с|со|а|ну|тоже|же|только|все|всех|всем|кажд\S*|эти|этим|этих|это|этот|микс\S*|табак\S*|основ\S*|для|крепости|сделай|хочу|надо|нужно|убери|убрать|уберем|исключи|без|не|ее|его|их|мне|нам|бы|плюс|ок|окей|да|теперь|обратно|назад|верни|вернем|тогда)$/;
+const NOAROMA_LOOK = 'a dark brown glossy sauce of pure unflavoured tobacco leaf';
+
+/**
+ * Клиент говорит про безаромку? null — нет. Иначе: remove — просит убрать («без безаромки», «убери безаромку»),
+ * pure — в сообщении больше ничего нет («давай добавим безаромку»), rest — сообщение без этой просьбы.
+ */
+export function noAromaAsk(text) {
+  const x = String(text || '').toLowerCase().replace(/ё/g, 'е');
+  const m = x.match(NOAROMA_ASK_RE);
+  if (!m) return null;
+  const before = x.slice(0, m.index);
+  const remove = /(^|[^а-я])(без|не\s+надо|не\s+нужн[а-я]*|не\s+хочу|не\s+добавля[а-я]*|убер[а-я]*|убрать|исключ[а-я]*|кроме)\s+(?:эт[а-я]+\s+|тво[а-я]+\s+)?$/.test(before);
+  // Убираем саму просьбу вместе со связкой перед ней («с», «и», «плюс», «добавь») и словом «табак» после.
+  const rest = (before.replace(/(^|[^а-яa-z])(с|со|и|плюс|\+|без|добав[а-я]*|докин[а-я]*|закин[а-я]*|убер[а-я]*|убрать)\s*$/, '$1') + ' ' +
+    x.slice(m.index + m[0].length).replace(/^\s*табак[а-я]*/, '')).replace(/\s+/g, ' ').replace(/\s+([,.;:!?])/g, '$1').replace(/^[\s,.;:!—-]+|[\s,;:—-]+$/g, '').trim();
+  const pure = !rest.split(/[^a-zа-я0-9]+/).some((w) => w.length > 1 && !NOAROMA_FILLER.test(w));
+  return { remove, pure, rest };
+}
+
+/** Безаромный табак из наличия: самый крепкий из тех, в чьём названии «No Aroma» / «без ароматизатора». */
+export function findNoAroma(catalog, words) {
+  return catalog.filter((it) => NOAROMA_ITEM_RE.test(`${it.n} ${it.a || ''}`))
+    .sort((a, b) => effStrength(b, words) - effStrength(a, words) || (bigOnly(a) ? 1 : 0) - (bigOnly(b) ? 1 : 0))[0] || null;
+}
+
+/** Поделить total процентов между долями ps в той же пропорции, кратно step, каждая не меньше step. */
+export function splitShares(ps, total, step = 5) {
+  const sum = ps.reduce((a, b) => a + b, 0) || 1;
+  const raw = ps.map((p) => (p * total) / sum);
+  const out = raw.map((r) => Math.max(step, Math.floor(r / step) * step));
+  let left = total - out.reduce((a, b) => a + b, 0);
+  const order = raw.map((r, i) => [r - Math.floor(r / step) * step, i]).sort((a, b) => b[0] - a[0] || a[1] - b[1]).map((x) => x[1]);
+  for (let k = 0; left > 0 && k < 100; k++, left -= step) out[order[k % order.length]] += step;
+  for (let k = 0; left < 0 && k < 100; k++) { const i = out.indexOf(Math.max(...out)); if (out[i] <= step) break; out[i] -= step; left += step; }
+  return out;
+}
+
+/** Добавить в микс безаромку: её доля — share %, остальные табаки ужимаются пропорционально. Уже есть — микс не трогаем. */
+export function withNoAroma(m, base, share, step, words) {
+  if (m.parts.some((p) => p.base || NOAROMA_ITEM_RE.test(`${p.item.n} ${p.item.a || ''}`))) return m;
+  const scaled = splitShares(m.parts.map((p) => p.p), 100 - share, step);
+  const parts = [...m.parts.map((p, i) => ({ ...p, was: p.p, p: scaled[i] })), { item: base, p: share, look: NOAROMA_LOOK, base: true }];
+  const calc = mixStrength(parts, words);
+  const s0 = typeof m.strength === 'number' ? m.strength : 0;
+  // Крепкая безаромка микс не ослабляет: точек не меньше, чем было.
+  return { ...m, parts, s0, strength: effStrength(base, words) >= 3 ? Math.max(s0, calc) : calc, softer: false };
+}
+
+/** Убрать безаромку, добавленную по просьбе: доли и крепость — как были до неё. */
+export function withoutNoAroma(m) {
+  if (!m.parts.some((p) => p.base)) return m;
+  const parts = m.parts.filter((p) => !p.base).map((p) => { const { was, ...rest } = p; return { ...rest, p: was || p.p }; });
+  const { s0, ...rest } = m;
+  return { ...rest, parts, strength: s0 || m.strength };
+}
+
+/** Дописать в задание для картинки ещё один ингредиент — тёмный табачный лист с подписью. */
+function noAromaImage(image, lang) {
+  if (!image) return ''; // задания от ИИ нет — картинку соберёт запасной шаблон, он берёт части микса сам
+  return image + ' One more ingredient in every mix: pure unflavoured tobacco. In each of the three mixes add one more portion, about a fifth of it, ' +
+    `of ${NOAROMA_LOOK.replace(/^a /, '')}, and give it its own small label «${lang === 'hy' ? 'ծխախոտ' : 'табак'}» in the same style as the other ingredient labels.`;
+}
+
+/** Обычный подбор с просьбой «и безаромку»: добавляем её в каждый микс. found: false — безаромки нет в наличии. */
+export function applyNoAroma(result, catalog, cfg, lang = 'ru') {
+  const st = cfg.settings;
+  const base = findNoAroma(catalog, st.strong_words);
+  if (!base) return { mixes: result, found: false };
+  const step = st.share_step, share = Math.max(step, Math.round(st.noaroma_share / step) * step);
+  const mixes = result.map((m) => withNoAroma(m, base, share, step, st.strong_words));
+  mixes.image0 = result.image0 || result.image || '';
+  mixes.image = mixes.some((m, i) => m !== result[i]) ? noAromaImage(mixes.image0, lang) : result.image || '';
+  return { mixes, found: true };
+}
+
+/** Показанные миксы — в компактном виде для диалога (табаки — ключами справочника). */
+export function packMixes(result) {
+  return { image: String(result.image || '').slice(0, 3200), image0: String(result.image0 || '').slice(0, 2500),
+    mixes: result.map((m) => ({ title: m.title, emoji: m.emoji, text: m.text, strength: m.strength, garnish: m.garnish || '', ...(m.s0 ? { s0: m.s0 } : {}),
+      parts: m.parts.map((p) => ({ k: p.item.k, p: p.p, look: p.look || '', ...(p.base ? { base: 1 } : {}), ...(p.was ? { was: p.was } : {}) })) })) };
+}
+
+/** Обратно: миксы из диалога с табаками из сегодняшнего наличия. null — какого-то табака уже нет. */
+export function unpackMixes(last, catalog) {
+  if (!last || !Array.isArray(last.mixes) || !last.mixes.length) return null;
+  const byKey = new Map(catalog.map((x) => [x.k, x]));
+  const mixes = [];
+  for (const m of last.mixes) {
+    const parts = (m.parts || []).map((p) => ({ item: byKey.get(p.k), p: p.p, look: p.look || '', ...(p.base ? { base: true } : {}), ...(p.was ? { was: p.was } : {}) }));
+    if (!parts.length || parts.some((p) => !p.item)) return null;
+    mixes.push({ ...m, parts });
+  }
+  mixes.image = last.image || '';
+  mixes.image0 = last.image0 || '';
+  return mixes;
+}
+
+/**
+ * «Давай добавим безаромку» / «убери безаромку» после подбора: те же три микса, меняется только состав.
+ * true — ответили клиенту; false — прошлые миксы восстановить не удалось, пусть идёт обычный подбор.
+ */
+async function reworkNoAroma(env, chat, session, lang, remove, t0) {
+  const cfg = await loadConfig(env);
+  env = applyBrains(env, cfg);
+  const t = tx(cfg, lang);
+  const catalog = await loadCatalog(env);
+  const prev = unpackMixes(session.last, catalog);
+  if (!prev) return false;
+  let result;
+  if (remove) {
+    result = prev.map(withoutNoAroma);
+    if (!result.some((m, i) => m !== prev[i])) { await send(env, chat, esc(t.noAromaAbsent)); return true; }
+    result.image = prev.image0 || '';
+    result.image0 = '';
+  } else {
+    const r = applyNoAroma(prev, catalog, cfg, lang);
+    if (!r.found) { await send(env, chat, esc(t.noAromaNone)); return true; }
+    if (!r.mixes.some((m, i) => m !== prev[i])) { await send(env, chat, esc(t.noAromaAlready)); return true; }
+    result = r.mixes;
+  }
+  session.prefs = { ...session.prefs, noaroma: !remove };
+  const progress = await startProgress(env, chat, t.picking, t.progress, '');
+  await deliver(env, chat, session, result, { cfg, t, more: true, progress, tm: { parse: 0, compose: 0 }, t0 });
+  return true;
 }
 
 /** Общая картинка: две попытки основной моделью, потом запасная. */
@@ -1573,6 +1756,7 @@ async function extractPrefs(env, text, prev = '') {
     relevant: !out || out.relevant !== false, // если ИИ не ответил — не блокируем человека
     like: arr(out && out.like), avoid: arr(out && out.avoid), groups: arr(out && out.groups),
     flavors: arr(out && out.flavors), brands: arr(out && out.brands), other_brands: arr(out && out.other_brands), strength, followup: !!(prev && out && out.followup === true),
+    na: out && (out.noaroma === 'add' || out.noaroma === 'remove') ? out.noaroma : '', // просьба про безаромку, как её понял ИИ
   };
 }
 
@@ -1583,14 +1767,18 @@ export function parsePrompt(cfg, catalog = [], withPrev = false) {
   return splitInstruction(cfg.instruction).parse.join('\n') + '\n\n' +
     'ТЕХНИЧЕСКИЕ ТРЕБОВАНИЯ:\n' +
     'Верни ТОЛЬКО JSON без пояснений:\n' +
-    '{"relevant":true,"like":[],"avoid":[],"groups":[],"flavors":[],"brands":[],"other_brands":[],"strength":"light|medium|strong|any|unknown"' + (withPrev ? ',"followup":false' : '') + '}\n' +
+    '{"relevant":true,"like":[],"avoid":[],"groups":[],"flavors":[],"brands":[],"other_brands":[],"strength":"light|medium|strong|any|unknown","noaroma":"no|add|remove"' + (withPrev ? ',"followup":false' : '') + '}\n' +
     '- relevant: false, если сообщение не по теме.\n' +
     '- like — вкусы, которые клиент хочет, avoid — которых не хочет: по одному слову в именительном падеже ("Малина", "Лайм", "Мята"), ВСЕГДА по-русски (с армянского переводи).\n' +
     '- groups: подходящие направления строго из списка: ' + (groups.join(', ') || 'Фруктовый, Ягодный, Цитрусовый, Освежающий, Десертный') + '.\n' +
     '- flavors: конкретные табаки, которые клиент назвал. Если узнаёшь табак — в оригинальном написании ("Creme Brulee", "Epic Mint"), иначе как написал клиент.\n' +
     '- brands: бренды, которые клиент любит, строго из списка: ' + (brands.join(', ') || '—') + '. Написание клиента сопоставь с ближайшим брендом из списка.\n' +
     '- other_brands: бренды, которые клиент назвал, но которых нет в списке выше (Darkside, Musthave, Snobless, Black Burn и т.п.). Бренд — это не табак: в flavors названия брендов не клади, даже если у другого бренда есть табак с таким же названием. Вкусы, которые клиент любит у этих брендов, — в like.\n' +
-    '- strength: light — курит лёгкое, medium — среднее, strong — крепкое, any — всё равно, unknown — не сказал.' +
+    '- strength: light — курит лёгкое, medium — среднее, strong — крепкое, any — всё равно, unknown — не сказал.\n' +
+    '- noaroma: "add" — клиент просит добавить в миксы табак БЕЗ аромата и вкуса. Его называют по-разному: «безаромка», «безаромный», no aroma, «основа», «база», ' +
+    '«нейтральный табак», «чистый табак», «табак без вкуса», «табак без запаха», «разбавь чем-нибудь крепким без аромата» — в любых формах и с опечатками («безоромка», «без аромы»). ' +
+    '"remove" — просит убрать такой табак из миксов. "no" — об этом не говорит. Такой табак — НЕ вкус: в like, flavors и groups его не клади, а сообщение с такой просьбой — по теме (relevant: true). ' +
+    'Не путай: «на основе клубники», «база — манго» — это про вкус ("no"); «табачный», «сигарный» вкус — это вкус (в like), а не безаромка ("no").' +
     (withPrev ? '\n- followup: тебе дан предыдущий запрос клиента и его новое сообщение. true — ТОЛЬКО если новое сообщение без предыдущего неполно: в нём нет своего вкуса или идеи, оно лишь уточняет прошлое («то же самое, только лёгкое», «такое же направление», «а без мяты?», «ещё что-нибудь такое», «полегче»). Тогда вкусы, табаки и общую идею бери из ОБОИХ сообщений вместе, а там, где они расходятся (крепость, «без …»), главнее новое. false — если в новом сообщении названы свои вкусы, напиток, блюдо или образ («джин с огурцом», «хочу ягодное», «что-нибудь с манго»): это новая просьба, предыдущий запрос не учитывай вообще, ни одного вкуса из него не бери. Сомневаешься — false.' : '');
 }
 
@@ -1736,6 +1924,7 @@ async function composeMixes(env, session, candidates, lang = 'ru', cfg = DEFAULT
     'Запрос клиента: ' + session.text + '\n' +
     'Желаемая крепость: ' + want + '\n' +
     (session.titles && session.titles.length ? 'Уже предлагали, не повторяй: ' + session.titles.join('; ') + '\n' : '') +
+    (session.prefs.noaroma ? 'Клиент просит добавить в миксы безаромный табак (без вкуса). Его добавит программа после тебя — сам его в состав не бери и табачные вкусы из-за этой просьбы не добавляй. Собирай миксы по остальным пожеланиям как обычно.\n' : '') +
     ((session.missing || []).length ? 'Сейчас нет в наличии: ' + session.missing.map((m) => `${m.name} (вкус: ${m.t.join(', ') || '—'})`).join('; ') +
       '. Не отказывай и не предлагай ждать поступления: собери три микса с максимально похожим вкусом из списка. Клиенту уже отдельно сказали, что этого табака нет: в названиях и описаниях миксов его не упоминай и не пиши про замену — описывай миксы как обычно.\n' : '') +
     '\nТабаки в наличии:\n' + lines.join('\n');
