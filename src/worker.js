@@ -140,6 +140,8 @@ export const DEFAULT_SETTINGS = [
   { key: 'badge_overlay', def: 'да', type: 'yesno', desc: 'Добавлять на картинку значок магазина в левый верхний угол (файл src/badge.png) (да / нет). Работает вместе с logo_overlay.' },
   { key: 'strength_memory_hours', def: '3', type: 'int', min: 0, max: 72,
     desc: 'Сколько часов бот помнит выбранную клиентом крепость и не переспрашивает в следующих запросах. 0 — спрашивать каждый раз.' },
+  { key: 'show_rating', def: 'да', type: 'yesno',
+    desc: 'Показывать у каждого табака в миксе рейтинг с htreviews — (4.5★); нажатие на него открывает страницу табака на htreviews (да / нет). У табаков без оценок и у вкусов, которых нет на htreviews, рейтинг не показывается.' },
   { key: 'prefer_small_packs', def: 'да', type: 'yesno',
     desc: 'Беречь корзину клиента (да / нет): дополнения к базе (доля до 30%) бот берёт из табаков, у которых есть маленькая пачка (до 40 г). Табак, который есть только в большой пачке, идёт базой или если равноценной замены в маленькой пачке нет. «нет» — фасовка на подбор не влияет.' },
   { key: 'only_in_stock', def: 'да', type: 'yesno', desc: 'Только то, что есть на складе (да / нет). Заработает, когда подключим выгрузку склада; до этого — все вкусы наших брендов.' },
@@ -1095,7 +1097,7 @@ async function onText(env, msg, ctx) {
 }
 
 /** /config — коротко, что сейчас действует. */
-const CODE_VERSION = '12.38 · 49 (вкладка «Соответствия»: рейтинг, число оценок, ссылка на htreviews; без «Исправить вручную»)';
+const CODE_VERSION = '12.39 · 50 (рейтинг табака со ссылкой на htreviews в составе микса — настройка show_rating)';
 export function configSummary(cfg, env = {}, stock = null) {
   const at = cfg._at ? new Date(cfg._at).toLocaleString('ru-RU', { timeZone: 'Europe/Moscow', day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) + ' МСК' : 'ещё не загружалась — работают значения из кода';
   const s = cfg.settings;
@@ -1119,7 +1121,7 @@ export function configSummary(cfg, env = {}, stock = null) {
     `Логотип на картинке: ${s.logo_overlay ? (env.IMAGES ? 'готовый файл' : 'рисует модель (нет привязки IMAGES в wrangler.toml)') : 'рисует модель'}\n` +
     `Стиль картинки: ${esc(s.image_style)} (${mixInstruction(cfg.instruction, s.image_style).fromTable ? 'раздел из таблицы' : 'текст из кода'})\n` +
     stockLine(stock ? { state: 'ok', ...stockStats(stock) } : null) + '\n' +
-    `Крепкое только по запросу: ${yn(s.strong_only_on_request)} · только из наличия: ${yn(s.only_in_stock)} · беречь корзину (маленькие пачки): ${yn(s.prefer_small_packs)} · картинки: ${yn(s.images)}\n` +
+    `Крепкое только по запросу: ${yn(s.strong_only_on_request)} · только из наличия: ${yn(s.only_in_stock)} · беречь корзину (маленькие пачки): ${yn(s.prefer_small_packs)} · картинки: ${yn(s.images)} · рейтинг у табаков: ${yn(s.show_rating)}\n` +
     `Админов: ${s.admins.length + String(env.ADMIN_IDS || '').split(',').filter((x) => x.trim()).length}\n\n` +
     'Изменения в таблице подтягиваются сами раз в 15 минут, или сразу — командой /reload.';
 }
@@ -1224,7 +1226,7 @@ export function mixesFromMessage(text) {
   return String(text || '').split(/\n\s*\n/).map((block) => {
     const lines = block.split('\n').map((x) => x.trim()).filter(Boolean);
     const parts = lines.map((l) => l.match(/^(\d{1,3})\s*%\s+(?:—\s+)?(.+)$/)).filter(Boolean).map((m) => {
-      const seg = m[2].split(' · ');
+      const seg = m[2].replace(/\s*\(\d(?:[.,]\d)?★\)\s*$/, '').split(' · ');
       const w = (seg[2] || '').match(/\d+/);
       return { p: Number(m[1]), name: seg[0].trim(), brand: (seg[1] || '').trim(), w: w ? Number(w[0]) : 0 };
     });
@@ -1409,14 +1411,13 @@ async function makeMixes(env, chat, session, more = false, lang = 'ru', note = '
   session.goneTold = true;
   await putSession(env, chat, session);
 
-  const bowl = cfg.settings.bowl_grams;
   const shop = cfg.settings.shop_url;
   // Одной строкой перед миксами: чего нет в наличии. Дальше миксы как обычно, без оговорок в описаниях.
   const gone = tellGone ? esc(t.outOfStock(session.missing.map((m) => m.name).join(', '))) + '\n\n' : '';
   const bst = candidates.booster;
   const tip = result.some((m) => m.softer)
     ? '\n\n' + esc(t.strengthTip(bst ? `${bst.b}${bst.l && bst.l !== 'Основная' ? ' ' + bst.l : ''} ${bst.n}` : '')) : '';
-  const text = gone + result.map((m, i) => renderMix(m, i, t, result.length, bowl)).join('\n\n') + tip +
+  const text = gone + result.map((m, i) => renderMix(m, i, t, { rating: cfg.settings.show_rating })).join('\n\n') + tip +
     '\n\n' + (orders.length ? t.orderHint : t.footer + (shop ? ' ' + shop : ''));
   const kb = resultKeyboard(t, orders, strengthSteps(session.prefs.strength, result));
   const sendMixes = () => send(env, chat, text, kb);
@@ -1904,14 +1905,21 @@ export function mixStrength(parts, words) {
 }
 
 /**
- * Карточка микса:
- *   Микс 1 из 3 · лучшее попадание
- *   ПЕЧЕНЬЕ С АРБУЗОМ И МЯТОЙ
- *   ┃ Kraken Strong Ligero · Cookie — 50% · 10 г   ← цитата Telegram (серая плашка)
- *   Описание.
- *   Крепость: средняя      ← считается кодом по табакам
+ * Рейтинг табака из справочника — « (4.5★)», цифра со звездой ведёт на страницу табака на htreviews.
+ * Нет оценок или вкуса нет на htreviews (своя карточка) — пусто. Неразрывный пробел держит рейтинг рядом с фасовкой.
  */
-export function renderMix(m, i, t = 'ru', total = 3, bowl = 20) {
+export function ratingLink(it) {
+  if (!it || it.o || !(it.r > 0) || !(it.c > 0) || !/^[a-z0-9\-_.\/%]+$/i.test(String(it.k || ''))) return '';
+  return `\u00A0(<a href="${SOURCE}/tobaccos/${it.k}">${Number(it.r).toFixed(1)}★</a>)`;
+}
+
+/**
+ * Карточка микса:
+ *   🍒 ВИШНЁВЫЙ РАФ, крепость ●●○○○      ← крепость считается кодом по табакам
+ *   Описание.
+ *   ┃ 60% Drunk Cherry · Spectrum Mix Line · пачка 25 г (4.5★)   ← цитата Telegram (серая плашка); рейтинг — по настройке show_rating
+ */
+export function renderMix(m, i, t = 'ru', opts = {}) {
   if (typeof t === 'string') t = tx(DEFAULTS, t);
   const parts = m.parts.map((p) => {
     const it = p.item;
@@ -1919,7 +1927,7 @@ export function renderMix(m, i, t = 'ru', total = 3, bowl = 20) {
     // Фасовка из наличия: «пачка 25 г», «пачки 25 / 100 г», а если есть только большая — «только пачка 200 г».
     const w = Array.isArray(it.w) ? [...new Set(it.w)].sort((a, b) => a - b) : [];
     const pack = !w.length ? '' : ` · <i>${esc(w.length > 1 ? t.packMany(w.join(' / ')) : w[0] > 40 ? t.packNote(w[0]) : t.packOne(w[0]))}</i>`;
-    return `${p.p}%\u2002<b>${esc(it.n)}</b> · ${esc(it.b + line)}${pack}`;
+    return `${p.p}%\u2002<b>${esc(it.n)}</b> · ${esc(it.b + line)}${pack}${opts.rating ? ratingLink(it) : ''}`;
   });
   // Крепость — пятью точками в строке названия: ●●○○○. Если числа нет (старые данные) — словами отдельной строкой.
   const n = typeof m.strength === 'number' && m.strength >= 1 && m.strength <= 5 ? m.strength : 0;
