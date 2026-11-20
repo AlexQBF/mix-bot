@@ -142,6 +142,8 @@ export const DEFAULT_SETTINGS = [
     desc: 'Сколько часов бот помнит выбранную клиентом крепость и не переспрашивает в следующих запросах. 0 — спрашивать каждый раз.' },
   { key: 'noaroma_share', def: '20', type: 'int', min: 5, max: 50,
     desc: 'Сколько безаромного табака (No Aroma) класть в микс, когда клиент сам попросил «добавь безаромку», %. Остальные табаки ужимаются пропорционально.' },
+  { key: 'rating_link', def: 'сайт', type: 'choice', options: { 'сайт': ['сайт', 'site', 'магазин', 'shop'], 'htreviews': ['htreviews', 'ht', 'хт'], 'нет': ['нет', 'no', '-', 'без'] },
+    desc: 'Куда ведёт нажатие на рейтинг табака в миксе: «сайт» — карточка товара в магазине (ссылки берутся из вкладки «Сайт»), «htreviews» — страница табака на htreviews, «нет» — рейтинг без ссылки. Если у табака нет карточки на сайте, при «сайт» рейтинг остаётся без ссылки.' },
   { key: 'show_rating', def: 'да', type: 'yesno',
     desc: 'Показывать у каждого табака в миксе рейтинг с htreviews — (4.5★); нажатие на него открывает страницу табака на htreviews (да / нет). У табаков без оценок и у вкусов, которых нет на htreviews, рейтинг не показывается.' },
   { key: 'prefer_small_packs', def: 'да', type: 'yesno',
@@ -1134,7 +1136,7 @@ async function onText(env, msg, ctx) {
 }
 
 /** /config — коротко, что сейчас действует. */
-const CODE_VERSION = '12.46 · 57 (приветствие: правка формулировок)';
+const CODE_VERSION = '12.47 · 58 (ссылки на сайт магазина: рейтинг ведёт на карточку товара, вкладка «Сайт», настройка rating_link)';
 export function configSummary(cfg, env = {}, stock = null) {
   const at = cfg._at ? new Date(cfg._at).toLocaleString('ru-RU', { timeZone: 'Europe/Moscow', day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) + ' МСК' : 'ещё не загружалась — работают значения из кода';
   const s = cfg.settings;
@@ -1158,7 +1160,7 @@ export function configSummary(cfg, env = {}, stock = null) {
     `Логотип на картинке: ${s.logo_overlay ? (env.IMAGES ? 'готовый файл' : 'рисует модель (нет привязки IMAGES в wrangler.toml)') : 'рисует модель'}\n` +
     `Стиль картинки: ${esc(s.image_style)} (${mixInstruction(cfg.instruction, s.image_style).fromTable ? 'раздел из таблицы' : 'текст из кода'})\n` +
     stockLine(stock ? { state: 'ok', ...stockStats(stock) } : null) + '\n' +
-    `Крепкое только по запросу: ${yn(s.strong_only_on_request)} · только из наличия: ${yn(s.only_in_stock)} · беречь корзину (маленькие пачки): ${yn(s.prefer_small_packs)} · картинки: ${yn(s.images)} · рейтинг у табаков: ${yn(s.show_rating)}\n` +
+    `Крепкое только по запросу: ${yn(s.strong_only_on_request)} · только из наличия: ${yn(s.only_in_stock)} · беречь корзину (маленькие пачки): ${yn(s.prefer_small_packs)} · картинки: ${yn(s.images)} · рейтинг у табаков: ${yn(s.show_rating)}${s.show_rating ? ` (ссылка: ${esc(s.rating_link)})` : ''}\n` +
     `Админов: ${s.admins.length + String(env.ADMIN_IDS || '').split(',').filter((x) => x.trim()).length}\n\n` +
     'Изменения в таблице подтягиваются сами раз в 15 минут, или сразу — командой /reload.';
 }
@@ -1480,7 +1482,7 @@ async function deliver(env, chat, session, result, { cfg, t, more = false, progr
   const bst = booster;
   const tip = result.some((m) => m.softer)
     ? '\n\n' + esc(t.strengthTip(bst ? `${bst.b}${bst.l && bst.l !== 'Основная' ? ' ' + bst.l : ''} ${bst.n}` : '')) : '';
-  const text = gone + result.map((m, i) => renderMix(m, i, t, { rating: cfg.settings.show_rating })).join('\n\n') + tip +
+  const text = gone + result.map((m, i) => renderMix(m, i, t, { rating: cfg.settings.show_rating, ratingLink: cfg.settings.rating_link })).join('\n\n') + tip +
     '\n\n' + (orders.length ? t.orderHint : t.footer + (shop ? ' ' + shop : ''));
   const kb = resultKeyboard(t, orders, strengthSteps(session.prefs.strength, result));
   const sendMixes = () => send(env, chat, text, kb);
@@ -2112,12 +2114,16 @@ export function mixStrength(parts, words) {
 }
 
 /**
- * Рейтинг табака из справочника — « (4.5★)», цифра со звездой ведёт на страницу табака на htreviews.
- * Нет оценок или вкуса нет на htreviews (своя карточка) — пусто. Неразрывный пробел держит рейтинг рядом с фасовкой.
+ * Рейтинг табака из справочника — « (4.5★)». Куда ведёт нажатие — настройка rating_link:
+ * «сайт» — карточка товара в магазине (it.u, из вкладки «Сайт»), «htreviews» — страница табака там, «нет» — без ссылки.
+ * Нет оценок или вкуса нет на htreviews (своя карточка) — рейтинга нет. Неразрывный пробел держит рейтинг рядом с фасовкой.
  */
-export function ratingLink(it) {
-  if (!it || it.o || !(it.r > 0) || !(it.c > 0) || !/^[a-z0-9\-_.\/%]+$/i.test(String(it.k || ''))) return '';
-  return `\u00A0(<a href="${SOURCE}/tobaccos/${it.k}">${Number(it.r).toFixed(1)}★</a>)`;
+export function ratingLink(it, mode = 'htreviews') {
+  if (!it || it.o || !(it.r > 0) || !(it.c > 0)) return '';
+  const star = `${Number(it.r).toFixed(1)}★`;
+  const url = mode === 'сайт' ? (/^https:\/\/[^\s"<>]+$/.test(String(it.u || '')) ? it.u : '')
+    : mode === 'htreviews' && /^[a-z0-9\-_.\/%]+$/i.test(String(it.k || '')) ? `${SOURCE}/tobaccos/${it.k}` : '';
+  return `\u00A0(${url ? `<a href="${esc(url).replace(/"/g, '%22')}">${star}</a>` : star})`;
 }
 
 /**
@@ -2134,7 +2140,7 @@ export function renderMix(m, i, t = 'ru', opts = {}) {
     // Фасовка из наличия: «пачка 25 г», «пачки 25 / 100 г», а если есть только большая — «только пачка 200 г».
     const w = Array.isArray(it.w) ? [...new Set(it.w)].sort((a, b) => a - b) : [];
     const pack = !w.length ? '' : ` · <i>${esc(w.length > 1 ? t.packMany(w.join(' / ')) : w[0] > 40 ? t.packNote(w[0]) : t.packOne(w[0]))}</i>`;
-    return `${p.p}%\u2002<b>${esc(it.n)}</b> · ${esc(it.b + line)}${pack}${opts.rating ? ratingLink(it) : ''}`;
+    return `${p.p}%\u2002<b>${esc(it.n)}</b> · ${esc(it.b + line)}${pack}${opts.rating ? ratingLink(it, opts.ratingLink) : ''}`;
   });
   // Крепость — пятью точками в строке названия: ●●○○○. Если числа нет (старые данные) — словами отдельной строкой.
   const n = typeof m.strength === 'number' && m.strength >= 1 && m.strength <= 5 ? m.strength : 0;
@@ -2382,7 +2388,10 @@ async function loadCatalog(env) {
   let items = parts.flatMap((p) => (p && p.items) || []);
   // Оставляем только табаки, которые есть на складе, и запоминаем, в каких пачках (w).
   if (stock && stock.items && Object.keys(stock.items).length >= STOCK_MIN) {
-    items = items.filter((x) => stock.items[x.k]).map((x) => ({ ...x, w: stock.items[x.k] }));
+    const site = stock.site || {};
+    const full = (u) => (u ? (u.startsWith('/') ? (site.origin || '') + u : u) : '');
+    // w — пачки в наличии, u — карточка этого табака на сайте магазина (самая маленькая пачка).
+    items = items.filter((x) => stock.items[x.k]).map((x) => ({ ...x, w: stock.items[x.k], u: full((site.links || {})[x.k]) }));
   } else {
     items = items.filter((x) => !x.d); // без склада снятые с производства не предлагаем
   }
@@ -3098,7 +3107,7 @@ function lineScore(stockLine, catLine) {
  * Сопоставляем позиции склада со справочником. map — готовые ответы (от ИИ или прошлых запусков): id → ключ табака или ''.
  * Возвращает items: { ключ: [веса пачек] } и список нераспознанного.
  */
-export function matchStock(positions, catalog, map = {}) {
+export function matchStock(positions, catalog, map = {}, site = null) {
   const brandNames = [...new Set(catalog.map((x) => x.b))];
   // Индекс справочника: бренд + «сжатое» название → табаки. Поиск по нему мгновенный —
   // это важно: у бесплатного Cloudflare очень мало процессорного времени на запрос.
@@ -3108,10 +3117,24 @@ export function matchStock(positions, catalog, map = {}) {
   const known = new Set(catalog.map((x) => x.k));
   const extraKeys = new Set(catalog.filter((x) => x.x).map((x) => x.k)); // найдены по прямой ссылке
   const ownKeys = new Set(catalog.filter((x) => x.o).map((x) => x.k));   // свои карточки (на htreviews вкуса нет)
-  const items = {}, unmatched = [];
-  let tobaccos = 0;
+  const items = {}, unmatched = [], links = {};
+  let tobaccos = 0, packs = 0, linked = 0;
   const done = new Map(); // одна и та же позиция в разных фасовках ищется один раз
   const pairs = new Map();
+  // Запасной путь к карточке на сайте — через справочник: позиция склада названа с опечаткой («Зеленное яблоко»),
+  // но ИИ уже связал её с табаком, а товар на сайте назван как в справочнике. Считаем один раз, только если понадобилось.
+  let siteKeys = null;
+  const siteByKey = (key, weight) => {
+    if (!siteKeys) {
+      siteKeys = new Map();
+      for (const x of site.entries) {
+        const hit = [...new Set(x.e.names.flatMap((v) => index.get(x.e.brand + '|' + squash(v)) || []))]
+          .map((it) => ({ it, line: lineScore(x.e.line, it.l) })).sort((a, b) => (a.it.o ? 1 : 0) - (b.it.o ? 1 : 0) || b.line - a.line || (b.it.c || 0) - (a.it.c || 0))[0];
+        if (hit && hit.line > -3 && !siteKeys.has(hit.it.k + '|' + x.e.weight)) siteKeys.set(hit.it.k + '|' + x.e.weight, x.url);
+      }
+    }
+    return siteKeys.get(key + '|' + weight) || '';
+  };
   for (const pos of positions) {
     const e = stockEntry(pos, brandNames);
     if (!e) continue;
@@ -3132,15 +3155,24 @@ export function matchStock(positions, catalog, map = {}) {
         if (k2) { key = k2; who = ownKeys.has(k2) ? 'своя карточка (ИИ)' : extraKeys.has(k2) ? 'прямая ссылка htreviews' : 'по названию'; } else if (key === undefined) who = 'по названию';
       }
       done.set(e.id, key);
-      pairs.set(e.id, { pos: `${e.brand} | ${e.line} | ${e.flavor}`, key: key || '', who: key === undefined ? 'ждёт разбора ИИ' : who, w: [] });
+      pairs.set(e.id, { pos: `${e.brand} | ${e.line} | ${e.flavor}`, key: key || '', who: key === undefined ? 'ждёт разбора ИИ' : who, w: [], site: [] });
       if (!key) unmatched.push({ id: e.id, brand: e.brand, line: e.line, flavor: e.flavor, tried: key === '' });
     }
     const key = done.get(e.id);
     if (key) (items[key] = items[key] || []).includes(e.weight) || items[key].push(e.weight);
-    const pr = pairs.get(e.id); if (!pr.w.includes(e.weight)) pr.w.push(e.weight);
+    const pr = pairs.get(e.id);
+    if (!pr.w.includes(e.weight)) {
+      pr.w.push(e.weight);
+      // Карточка этой фасовки на сайте магазина.
+      const url = site ? siteUrl(site, e, e.weight) || (key ? siteByKey(key, e.weight) : '') : '';
+      packs++;
+      if (url) { pr.site.push([e.weight, url]); linked++; if (key) (links[key] = links[key] || []).push([e.weight, url]); }
+    }
   }
   for (const k of Object.keys(items)) items[k].sort((a, b) => a - b);
-  return { items, unmatched, tobaccos, pairs: [...pairs.values()] };
+  // Одна ссылка на табак — на самую маленькую пачку: её бот и советует.
+  for (const k of Object.keys(links)) links[k] = links[k].sort((a, b) => a[0] - b[0])[0][1];
+  return { items, unmatched, tobaccos, pairs: [...pairs.values()], links, packs, linked };
 }
 
 const TAB_RETRY_MS = 3600e3;
@@ -3158,7 +3190,67 @@ export function matchRow(p, it) {
     real && it.c > 0 && it.r > 0 ? it.r : '',
     real ? it.c || 0 : '',
     real ? `${SOURCE}/tobaccos/${it.k}` : '',
+    (p.site || []).slice().sort((a, b) => a[0] - b[0]), // [[вес, ссылка на сайт магазина], …]
   ];
+}
+
+/* ───── Сайт магазина: ссылки на карточки товаров (вкладка «Сайт» — выгрузка каталога из Тильды) ───── */
+
+const unHtml = (x) => String(x).replace(/&amp;/g, '&').replace(/&quot;/g, '"').replace(/&#0?39;|&apos;/g, "'").replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&nbsp;/g, ' ');
+
+/**
+ * Название товара на сайте («KRAKEN Medium Seco 30 гр Фисташки», «Хулиган Поп 25 г МЯТНЫЙ АРБУЗ (ТОР)») →
+ * бренд, линейка, вес и вкус — тем же разбором, что и позиция склада, чтобы одно и то же называлось одинаково.
+ */
+export function siteEntry(title, brandNames) {
+  const t = unHtml(title).replace(/\s+/g, ' ').trim();
+  const m = t.match(/^(.*?\S)\s+(\d{2,3})\s*гр?\.?\s+(.+)$/i);
+  if (!m) return null;
+  return stockEntry({ group: `${m[1]} ${m[2]} гр`, name: `${m[1]}  ${m[3].replace(/[,;.\s]+$/, '')}  ${m[2]} гр` }, brandNames);
+}
+
+/** Каталог сайта → два указателя: по точному названию позиции и по бренду + вкусу + весу. */
+export function siteIndex(rows, brandNames) {
+  const byId = new Map(), byName = new Map(), entries = [];
+  let size = 0;
+  for (const r of rows || []) {
+    const url = String((r && r[1]) || '').trim();
+    if (!/^https:\/\/[^\s"<>]+$/.test(url)) continue;
+    const e = siteEntry(r[0], brandNames);
+    if (!e || !e.weight) continue;
+    size++;
+    const rec = { url, line: e.line };
+    entries.push({ e, url });
+    if (!byId.has(e.id + '|' + e.weight)) byId.set(e.id + '|' + e.weight, rec);
+    for (const v of e.names) {
+      const k = e.brand + '|' + squash(v) + '|' + e.weight;
+      (byName.get(k) || byName.set(k, []).get(k)).push(rec);
+    }
+  }
+  return { byId, byName, entries, size };
+}
+
+/** Ссылка на карточку товара для позиции склада e в фасовке weight. Пусто — на сайте такой нет. */
+export function siteUrl(idx, e, weight) {
+  const exact = idx.byId.get(e.id + '|' + weight);
+  if (exact) return exact.url;
+  // Название записано чуть иначе (другая линейка в названии, скобки) — ищем по бренду, вкусу и весу.
+  const cands = [...new Set(e.names.flatMap((v) => idx.byName.get(e.brand + '|' + squash(v) + '|' + weight) || []))];
+  if (!cands.length) return '';
+  const best = cands.map((r) => ({ r, s: squash(r.line) === squash(e.line) ? 99 : lineScore(e.line, r.line) })).sort((a, b) => b.s - a.s)[0];
+  return best.s > -3 ? best.r.url : ''; // явно другая линейка (Strong ↔ Medium) — это другой товар
+}
+
+/** Каталог сайта из вкладки «Сайт» — только наши бренды, только название и ссылка. */
+async function fetchSite(env, brandNames) {
+  if (!(env.SHEET_SCRIPT_URL && env.SHEET_SECRET)) return { rows: null, state: 'off' };
+  try {
+    const j = await sheetScript(env, { action: 'site', brands: brandNames });
+    return Array.isArray(j.rows) ? { rows: j.rows, state: 'ok' } : { rows: null, state: 'notab' };
+  } catch (e) {
+    // Старый скрипт Google такого действия не знает — просто живём без ссылок на сайт.
+    return { rows: null, state: /не знает действие|unknown action/i.test(e.message) ? 'oldscript' : 'error' };
+  }
 }
 
 async function allBrandItems(env, cfg) {
@@ -3173,7 +3265,7 @@ export async function syncStock(env, rows, cfg, force = false) {
   const map = (await env.KV.get('stockmap', 'json').catch(() => null)) || {};
   const catmeta = await env.KV.get('catmeta').catch(() => null);
   // Дешёвая проверка до разбора: та же выгрузка, те же ответы ИИ, тот же справочник, тот же день — ничего не делаем.
-  const hash = quickHash(JSON.stringify(rows || [])) + ':' + Object.keys(map).length + ':t2:' +
+  const hash = quickHash(JSON.stringify(rows || [])) + ':' + Object.keys(map).length + ':t3:' + ((rows && rows.siteRev) || '') + ':' +
     quickHash(String(catmeta || '')) + ':' + new Date().toISOString().slice(0, 10);
   // …кроме случая, когда в прошлый раз не удалось записать вкладку «Соответствия»: тогда пробуем ещё раз.
   // И если в таблице ещё старый скрипт Google (вкладка без рейтинга и ссылок) — раз в час проверяем, не обновили ли его.
@@ -3186,15 +3278,23 @@ export async function syncStock(env, rows, cfg, force = false) {
   }
   const catalog = await allBrandItems(env, cfg);
   let tabError = '', tabOld = false;
-  const res = matchStock(positions, catalog, map);
-  const stock = { at: new Date().toISOString(), hash, positions: positions.length, tobaccos: res.tobaccos, items: res.items, unmatched: res.unmatched };
+  // Каталог сайта магазина (вкладка «Сайт») — чтобы у каждой фасовки была ссылка на её карточку.
+  const brandNames = [...new Set(catalog.map((x) => x.b))];
+  const siteRows = await fetchSite(env, brandNames);
+  const site = siteRows.rows ? siteIndex(siteRows.rows, brandNames) : null;
+  const res = matchStock(positions, catalog, map, site);
+  const origin = (Object.values(res.links)[0] || '').replace(/^(https:\/\/[^/]+).*$/, '$1');
+  const stock = { at: new Date().toISOString(), hash, positions: positions.length, tobaccos: res.tobaccos, items: res.items, unmatched: res.unmatched,
+    site: { state: siteRows.state, total: site ? site.size : 0, packs: res.packs, linked: res.linked, origin,
+      links: Object.fromEntries(Object.entries(res.links).map(([k, u]) => [k, origin && u.startsWith(origin + '/') ? u.slice(origin.length) : u])) } };
   await env.KV.put('stock', JSON.stringify(stock));
   // Вкладка «Соответствия»: что с чем склеено, рейтинг, число оценок и ссылка на htreviews. Пишем, только когда что-то пересчитали.
   if (env.SHEET_SCRIPT_URL && env.SHEET_SECRET) {
     const byKey = new Map(catalog.map((x) => [x.k, x]));
     const tab = res.pairs.sort((a, b) => a.pos.localeCompare(b.pos, 'ru')).map((p) => matchRow(p, byKey.get(p.key)));
-    // v: 2 — колонки нового вида. Старый скрипт Google возьмёт из строки первые четыре и ответит без layout.
-    tabError = await sheetScript(env, { action: 'match', v: 2, rows: tab }).then((j) => { tabOld = !(j && j.layout === 2); return ''; }, (e) => e.message);
+    // v: 3 — восемь колонок (последняя — ссылки на сайт по фасовкам). Старый скрипт Google возьмёт из строки, сколько умеет,
+    // и ответит прежним номером layout — по нему видно, что скрипт пора обновить.
+    tabError = await sheetScript(env, { action: 'match', v: 3, rows: tab }).then((j) => { tabOld = !(j && j.layout === 3); return ''; }, (e) => e.message);
     if (tabError) {
       console.log('match tab', tabError);
       if (/unknown action|не знает действие/i.test(tabError)) tabError = 'в таблице развёрнута старая версия скрипта Google — обновите его (Управление развертываниями → карандаш → Новая версия)';
@@ -3214,8 +3314,10 @@ export async function syncStock(env, rows, cfg, force = false) {
 /** Прочитать вкладку «Наличие» (через скрипт Google или по открытой ссылке). null — вкладки нет. */
 export async function fetchStockRows(env, fetcher = fetch) {
   if (env.SHEET_SCRIPT_URL && env.SHEET_SECRET) {
-    const j = await sheetScript(env, { action: 'config', tabs: [STOCK_TAB] }, fetcher);
-    return Array.isArray(j.tabs && j.tabs[STOCK_TAB]) ? j.tabs[STOCK_TAB].map((r) => r.map((c) => String(c))) : null;
+    const j = await sheetScript(env, { action: 'config', tabs: [STOCK_TAB], siteRev: true }, fetcher);
+    const rows = Array.isArray(j.tabs && j.tabs[STOCK_TAB]) ? j.tabs[STOCK_TAB].map((r) => r.map((c) => String(c))) : null;
+    if (rows) rows.siteRev = String(j.siteRev || ''); // отпечаток вкладки «Сайт»: изменился — пересчитываем ссылки
+    return rows;
   }
   return fetcher(sheetUrl(env.CONFIG_SHEET_ID, STOCK_TAB).replace('headers=1', 'headers=0'), { headers: { accept: 'text/csv' } })
     .then((r) => r.text()).then((x) => (/^\s*</.test(x) ? null : parseCSV(x))).catch(() => null);
@@ -3275,7 +3377,16 @@ export function stockReport(stock, catmeta = null) {
   const by = {};
   for (const k of Object.keys(stock.items)) { const b = k.split('/')[0]; by[b] = (by[b] || 0) + 1; }
   if (stock.tabError) s += '\n\n⚠️ Вкладка «Соответствия» не записана: ' + stock.tabError;
-  else if (stock.tabOld) s += '\n\nℹ️ В таблице старая версия скрипта Google: вкладка «Соответствия» пока без рейтинга, числа оценок и ссылок. Обновите скрипт и пришлите /stock.';
+  else if (stock.tabOld) s += '\n\nℹ️ В таблице старая версия скрипта Google: вкладка «Соответствия» пишется в старом виде. Обновите скрипт и пришлите /stock.';
+  const site = stock.site;
+  if (site) {
+    s += '\n\n🔗 Сайт: ' + (site.state === 'ok'
+      ? `карточка на сайте есть у ${site.linked} из ${site.packs} фасовок (в выгрузке сайта ${site.total} товаров наших брендов).` +
+        (site.linked < site.packs ? ' У кого нет — пустая колонка «Сайт» во вкладке «Соответствия».' : '')
+      : site.state === 'notab' ? 'вкладки «Сайт» нет или она пустая — ссылок на сайт нет. Загрузите в неё выгрузку каталога из Тильды.'
+      : site.state === 'oldscript' ? 'в таблице старая версия скрипта Google — ссылок на сайт нет. Обновите скрипт и пришлите /stock.'
+      : site.state === 'error' ? 'не получилось прочитать вкладку «Сайт» — ссылок на сайт нет. Попробуйте /stock ещё раз.' : 'ссылки не подключены.');
+  }
   s += '\n\nПо брендам: ' + Object.entries(by).map(([b, n]) => `${b} — ${n}`).join(', ');
   if (catmeta && Object.keys(catmeta).length) {
     s += '\nСправочник htreviews: ' + Object.entries(catmeta).map(([b, m]) => `${b} — ${m.total} (${new Date(m.updated).toLocaleDateString('ru-RU', { timeZone: 'Europe/Moscow', day: '2-digit', month: '2-digit' })})`).join(', ');
