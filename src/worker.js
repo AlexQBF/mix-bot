@@ -87,8 +87,9 @@ export const DEFAULT_TEXTS = {
   pack_one: ['пачка {g} г', '{g} գ տուփ', 'Пометка у табака: в какой пачке он есть; {g} — вес пачки'],
   pack_many: ['пачки {g} г', 'տուփեր՝ {g} գ', 'Пометка у табака, если есть несколько пачек; {g} — веса через «/»'],
   pack_note: ['только пачка {g} г', 'միայն {g} գ տուփ', 'Пометка у табака, которого нет в маленькой пачке; {g} — вес пачки'],
-  pack_short: ['{g} г', '{g} գ', 'Короткая пометка о пачках (настройка short_lines); {g} — вес или веса через «/»'],
-  pack_short_only: ['только {g} г', 'միայն {g} գ', 'Короткая пометка у табака, которого нет в маленькой пачке; {g} — вес пачки'],
+  pack_short: ['{g}\u00A0г', '{g}\u00A0գ', 'Короткая пометка о пачке (настройка short_lines); {g} — вес самой маленькой пачки'],
+  pack_short_from: ['от\u00A0{g}\u00A0г', '{g}\u00A0գ-ից', 'Короткая пометка, если маленькой пачки нет, а больших несколько; {g} — вес наименьшей из них'],
+  pack_short_only: ['только {g}\u00A0г', 'միայն {g}\u00A0գ', 'Короткая пометка у табака, которого нет в маленькой пачке; {g} — вес пачки'],
   bowl_note: ['Граммы указаны на чашу {g} г.', 'Գրամները նշված են {g} գ թասի համար։', 'Под последним миксом; {g} — граммы в чаше'],
   footer: ['🛒 Покажи этот список в магазине — соберём.', '🛒 Ցույց տուր այս ցուցակը խանութում, և մենք կհավաքենք։', 'Под последним миксом, перед ссылкой на сайт'],
   btn_more: ['🔄 Ещё', '🔄 Էլի', 'Кнопка под миксами: ещё три варианта на тот же запрос'],
@@ -145,7 +146,7 @@ export const DEFAULT_SETTINGS = [
   { key: 'noaroma_share', def: '20', type: 'int', min: 5, max: 50,
     desc: 'Сколько безаромного табака (No Aroma) класть в микс, когда клиент сам попросил «добавь безаромку», %. Остальные табаки ужимаются пропорционально.' },
   { key: 'short_lines', def: 'да', type: 'yesno',
-    desc: 'Короткие строки состава в миксе: «50% Cheddar Cheese · Kraken · 30/100 г» — без линейки табака и слова «пачки», чтобы строка помещалась на экране телефона (да / нет). Полное название с линейкой остаётся в сообщении менеджеру и на странице по ссылке. «нет» — как раньше: «Kraken Medium Seco · пачки 30 / 100 г».' },
+    desc: 'Короткие строки состава в миксе: «50% Cheddar Cheese · Kraken · 30 г» — без линейки табака и слова «пачки», из пачек только самая маленькая, чтобы строка помещалась на экране телефона (да / нет). Полное название с линейкой остаётся в сообщении менеджеру и на странице по ссылке. «нет» — как раньше: «Kraken Medium Seco · пачки 30 / 100 г».' },
   { key: 'rating_link', def: 'сайт', type: 'choice', options: { 'сайт': ['сайт', 'site', 'магазин', 'shop'], 'htreviews': ['htreviews', 'ht', 'хт'], 'нет': ['нет', 'no', '-', 'без'] },
     desc: 'Куда ведёт нажатие на рейтинг табака в миксе: «сайт» — карточка товара в магазине (ссылки берутся из вкладки «Сайт»), «htreviews» — страница табака на htreviews, «нет» — рейтинг без ссылки. Если у табака нет карточки на сайте, при «сайт» рейтинг остаётся без ссылки.' },
   { key: 'show_rating', def: 'да', type: 'yesno',
@@ -613,7 +614,7 @@ export function tx(cfg, lang = 'ru') {
     tooFew: g('too_few'), failed: g('failed'), more: g('btn_more'), newReq: g('btn_new'), stronger: g('btn_stronger'), lighter: g('btn_lighter'),
     strengthLabel: g('strength_label'), strengthWord: g('strength_word'),
     strengthNames: ['', g('strength_1'), g('strength_2'), g('strength_3'), g('strength_4'), g('strength_5')],
-    gram: g('gram'), packNote: (w) => fill(g('pack_note'), { g: w }), packOne: (w) => fill(g('pack_one'), { g: w }), packShort: (w) => fill(g('pack_short'), { g: w }), packShortOnly: (w) => fill(g('pack_short_only'), { g: w }), orderHint: g('order_hint'), orderReady: (name) => fill(g('order_ready'), { name }), orderOpen: g('order_open'), noSwear: g('no_swear'), orderBtn: (name) => fill(g('order_btn'), { name }), orderText: g('order_text'), orderTail: g('order_tail'), orderTextMix: (name) => fill(g('order_text_mix'), { name }), packMany: (w) => fill(g('pack_many'), { g: w }), bowlNote: (gr) => fill(g('bowl_note'), { g: gr }), footer: g('footer'),
+    gram: g('gram'), packNote: (w) => fill(g('pack_note'), { g: w }), packOne: (w) => fill(g('pack_one'), { g: w }), packShort: (w) => fill(g('pack_short'), { g: w }), packShortFrom: (w) => fill(g('pack_short_from'), { g: w }), packShortOnly: (w) => fill(g('pack_short_only'), { g: w }), orderHint: g('order_hint'), orderReady: (name) => fill(g('order_ready'), { name }), orderOpen: g('order_open'), noSwear: g('no_swear'), orderBtn: (name) => fill(g('order_btn'), { name }), orderText: g('order_text'), orderTail: g('order_tail'), orderTextMix: (name) => fill(g('order_text_mix'), { name }), packMany: (w) => fill(g('pack_many'), { g: w }), bowlNote: (gr) => fill(g('bowl_note'), { g: gr }), footer: g('footer'),
     llmLang: lang === 'hy' ? 'армянском (восточноармянский литературный, армянским алфавитом)' : 'русском',
   };
 }
@@ -1140,7 +1141,7 @@ async function onText(env, msg, ctx) {
 }
 
 /** /config — коротко, что сейчас действует. */
-const CODE_VERSION = '12.50 · 61 (короткие строки состава: без линейки и слова «пачки» — настройка short_lines)';
+const CODE_VERSION = '12.51 · 62 (в короткой строке состава — только самая маленькая пачка)';
 export function configSummary(cfg, env = {}, stock = null) {
   const at = cfg._at ? new Date(cfg._at).toLocaleString('ru-RU', { timeZone: 'Europe/Moscow', day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) + ' МСК' : 'ещё не загружалась — работают значения из кода';
   const s = cfg.settings;
@@ -2155,10 +2156,12 @@ export function renderMix(m, i, t = 'ru', opts = {}) {
     // (один и тот же вкус в двух линейках бренда) — opts.keepLine.
     const short = !!opts.short;
     const line = it.l && it.l !== 'Основная' && (!short || (opts.keepLine && opts.keepLine.has(it.k))) ? ' ' + it.l : '';
-    // Фасовка из наличия: «пачка 25 г», «пачки 25 / 100 г», а если есть только большая — «только пачка 200 г»; коротко — «25 г», «25/100 г», «только 200 г».
+    // Фасовка из наличия: «пачка 25 г», «пачки 25 / 100 г», а если есть только большая — «только пачка 200 г».
+    // Коротко — одна пачка, самая маленькая («25 г»): на микс её хватает, перечислять остальные незачем.
+    // Маленькой нет — «только 200 г»; маленькой нет, а больших несколько — «от 100 г».
     const w = Array.isArray(it.w) ? [...new Set(it.w)].sort((a, b) => a - b) : [];
     const packText = !w.length ? '' : short
-      ? (w.length > 1 ? t.packShort(w.join('/')) : w[0] > 40 ? t.packShortOnly(w[0]) : t.packShort(w[0]))
+      ? (w[0] <= PACK_SMALL ? t.packShort(w[0]) : w.length > 1 ? t.packShortFrom(w[0]) : t.packShortOnly(w[0]))
       : (w.length > 1 ? t.packMany(w.join(' / ')) : w[0] > 40 ? t.packNote(w[0]) : t.packOne(w[0]));
     const pack = packText ? ` · <i>${esc(packText)}</i>` : '';
     return `${p.p}%\u2002<b>${esc(it.n)}</b> · ${esc(it.b + line)}${pack}${opts.rating ? ratingLink(it, opts.ratingLink) : ''}`;
