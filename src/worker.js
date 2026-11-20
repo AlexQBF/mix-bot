@@ -83,7 +83,9 @@ export const DEFAULT_TEXTS = {
     'Ответ после нажатия «Заказать»'],
   order_open: ['✍️ Написать менеджеру', '✍️ Գրել մենեջերին', 'Кнопка, которая открывает чат с менеджером'],
   order_btn: ['{name}', '{name}', 'Кнопка заказа под миксами; {name} — эмодзи микса'],
-  order_text: ['Здравствуйте! Хочу заказать табаки для микса «{name}»:', 'Բարև Ձեզ։ Ուզում եմ պատվիրել ծխախոտներ «{name}» միքսի համար․', 'Первая строка готового сообщения менеджеру'],
+  order_text: ['Здравствуйте! Хочу заказать табаки:', 'Բարև Ձեզ։ Ուզում եմ պատվիրել ծխախոտներ․', 'Первая строка готового сообщения менеджеру; под ней — список табаков'],
+  order_tail: ['Подскажите, есть в наличии?', 'Կասե՞ք՝ առկա են։', 'Последняя строка готового сообщения менеджеру, после списка табаков'],
+  order_text_mix: ['Здравствуйте! Хочу заказать табаки для микса «{name}».', 'Բարև Ձեզ։ Ուզում եմ պատվիրել ծխախոտներ «{name}» միքսի համար։', 'Запасной текст сообщения менеджеру, если список табаков не поместился в ссылку; {name} — название микса'],
   pack_one: ['пачка {g} г', '{g} գ տուփ', 'Пометка у табака: в какой пачке он есть; {g} — вес пачки'],
   pack_many: ['пачки {g} г', 'տուփեր՝ {g} գ', 'Пометка у табака, если есть несколько пачек; {g} — веса через «/»'],
   pack_note: ['только пачка {g} г', 'միայն {g} գ տուփ', 'Пометка у табака, которого нет в маленькой пачке; {g} — вес пачки'],
@@ -605,7 +607,7 @@ export function tx(cfg, lang = 'ru') {
     tooFew: g('too_few'), failed: g('failed'), more: g('btn_more'), newReq: g('btn_new'), stronger: g('btn_stronger'), lighter: g('btn_lighter'),
     strengthLabel: g('strength_label'), strengthWord: g('strength_word'),
     strengthNames: ['', g('strength_1'), g('strength_2'), g('strength_3'), g('strength_4'), g('strength_5')],
-    gram: g('gram'), packNote: (w) => fill(g('pack_note'), { g: w }), packOne: (w) => fill(g('pack_one'), { g: w }), orderHint: g('order_hint'), orderReady: (name) => fill(g('order_ready'), { name }), orderOpen: g('order_open'), noSwear: g('no_swear'), orderBtn: (name) => fill(g('order_btn'), { name }), orderText: (name) => fill(g('order_text'), { name }), packMany: (w) => fill(g('pack_many'), { g: w }), bowlNote: (gr) => fill(g('bowl_note'), { g: gr }), footer: g('footer'),
+    gram: g('gram'), packNote: (w) => fill(g('pack_note'), { g: w }), packOne: (w) => fill(g('pack_one'), { g: w }), orderHint: g('order_hint'), orderReady: (name) => fill(g('order_ready'), { name }), orderOpen: g('order_open'), noSwear: g('no_swear'), orderBtn: (name) => fill(g('order_btn'), { name }), orderText: g('order_text'), orderTail: g('order_tail'), orderTextMix: (name) => fill(g('order_text_mix'), { name }), packMany: (w) => fill(g('pack_many'), { g: w }), bowlNote: (gr) => fill(g('bowl_note'), { g: gr }), footer: g('footer'),
     llmLang: lang === 'hy' ? 'армянском (восточноармянский литературный, армянским алфавитом)' : 'русском',
   };
 }
@@ -1097,7 +1099,7 @@ async function onText(env, msg, ctx) {
 }
 
 /** /config — коротко, что сейчас действует. */
-const CODE_VERSION = '12.40 · 51 (кнопки выбора микса — одной строкой, эмодзи; рейтинг табака со ссылкой — настройка show_rating)';
+const CODE_VERSION = '12.41 · 52 (готовое сообщение менеджеру: список табаков и «Подскажите, есть в наличии?», без названия микса)';
 export function configSummary(cfg, env = {}, stock = null) {
   const at = cfg._at ? new Date(cfg._at).toLocaleString('ru-RU', { timeZone: 'Europe/Moscow', day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) + ' МСК' : 'ещё не загружалась — работают значения из кода';
   const s = cfg.settings;
@@ -1235,13 +1237,23 @@ export function mixesFromMessage(text) {
   }).filter(Boolean);
 }
 
+/**
+ * Готовое сообщение менеджеру: приветствие, список табаков, вопрос про наличие. Название микса менеджеру не нужно.
+ *   Здравствуйте! Хочу заказать табаки:
+ *   — Паучок · Хулиган Поп, пачка 200 г
+ *   Подскажите, есть в наличии?
+ */
+export function orderMessage(t, lines) {
+  return [t.orderText, ...lines, t.orderTail].filter(Boolean).join('\n');
+}
+
 /** Ссылка в чат с менеджером с готовым текстом заказа — по миксу, прочитанному из сообщения. */
 export function orderLink(mix, t, contact) {
   const user = String(contact || '').trim().replace(/^https?:\/\/t\.me\//i, '').replace(/^@/, '');
   if (!mix || !/^[a-z][a-z0-9_]{3,31}$/i.test(user)) return null;
-  const body = t.orderText(mix.title) + '\n\n' + mix.parts.map((p) => `— ${p.name}${p.brand ? ' · ' + p.brand : ''}` + (p.w ? `, ${t.packOne(p.w)}` : '')).join('\n');
+  const body = orderMessage(t, mix.parts.map((p) => `— ${p.name}${p.brand ? ' · ' + p.brand : ''}` + (p.w ? `, ${t.packOne(p.w)}` : '')));
   let url = `https://t.me/${user}?text=` + encodeURIComponent(body);
-  if (url.length > 1900) url = `https://t.me/${user}?text=` + encodeURIComponent(t.orderText(mix.title));
+  if (url.length > 1900) url = `https://t.me/${user}?text=` + encodeURIComponent(t.orderTextMix(mix.title));
   return url;
 }
 
@@ -1303,10 +1315,10 @@ export function orderButtons(mixes, t, contact) {
       const ln = full && it.l && it.l !== 'Основная' ? ' ' + it.l : '';
       return `— ${it.n} · ${it.b}${ln}` + (w ? `, ${t.packOne(w)}` : '');
     };
-    const link = (full) => `https://t.me/${user}?text=` + encodeURIComponent(t.orderText(title) + '\n\n' + m.parts.map((p) => line(p, full)).join('\n'));
+    const link = (full) => `https://t.me/${user}?text=` + encodeURIComponent(orderMessage(t, m.parts.map((p) => line(p, full))));
     let url = link(true);
     if (url.length > 1900) url = link(false); // слишком длинная ссылка — без названий линеек
-    if (url.length > 1900) url = `https://t.me/${user}?text=` + encodeURIComponent(t.orderText(title));
+    if (url.length > 1900) url = `https://t.me/${user}?text=` + encodeURIComponent(t.orderTextMix(title));
     // На кнопке — только эмодзи микса (тот же, что перед его названием): три кнопки помещаются в одну строку.
     return { text: t.orderBtn(m.emoji || String(mixes.indexOf(m) + 1)).slice(0, 60), url, title };
   });
