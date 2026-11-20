@@ -87,6 +87,8 @@ export const DEFAULT_TEXTS = {
   pack_one: ['пачка {g} г', '{g} գ տուփ', 'Пометка у табака: в какой пачке он есть; {g} — вес пачки'],
   pack_many: ['пачки {g} г', 'տուփեր՝ {g} գ', 'Пометка у табака, если есть несколько пачек; {g} — веса через «/»'],
   pack_note: ['только пачка {g} г', 'միայն {g} գ տուփ', 'Пометка у табака, которого нет в маленькой пачке; {g} — вес пачки'],
+  pack_short: ['{g} г', '{g} գ', 'Короткая пометка о пачках (настройка short_lines); {g} — вес или веса через «/»'],
+  pack_short_only: ['только {g} г', 'միայն {g} գ', 'Короткая пометка у табака, которого нет в маленькой пачке; {g} — вес пачки'],
   bowl_note: ['Граммы указаны на чашу {g} г.', 'Գրամները նշված են {g} գ թասի համար։', 'Под последним миксом; {g} — граммы в чаше'],
   footer: ['🛒 Покажи этот список в магазине — соберём.', '🛒 Ցույց տուր այս ցուցակը խանութում, և մենք կհավաքենք։', 'Под последним миксом, перед ссылкой на сайт'],
   btn_more: ['🔄 Ещё', '🔄 Էլի', 'Кнопка под миксами: ещё три варианта на тот же запрос'],
@@ -142,6 +144,8 @@ export const DEFAULT_SETTINGS = [
     desc: 'Сколько часов бот помнит выбранную клиентом крепость и не переспрашивает в следующих запросах. 0 — спрашивать каждый раз.' },
   { key: 'noaroma_share', def: '20', type: 'int', min: 5, max: 50,
     desc: 'Сколько безаромного табака (No Aroma) класть в микс, когда клиент сам попросил «добавь безаромку», %. Остальные табаки ужимаются пропорционально.' },
+  { key: 'short_lines', def: 'да', type: 'yesno',
+    desc: 'Короткие строки состава в миксе: «50% Cheddar Cheese · Kraken · 30/100 г» — без линейки табака и слова «пачки», чтобы строка помещалась на экране телефона (да / нет). Полное название с линейкой остаётся в сообщении менеджеру и на странице по ссылке. «нет» — как раньше: «Kraken Medium Seco · пачки 30 / 100 г».' },
   { key: 'rating_link', def: 'сайт', type: 'choice', options: { 'сайт': ['сайт', 'site', 'магазин', 'shop'], 'htreviews': ['htreviews', 'ht', 'хт'], 'нет': ['нет', 'no', '-', 'без'] },
     desc: 'Куда ведёт нажатие на рейтинг табака в миксе: «сайт» — карточка товара в магазине (ссылки берутся из вкладки «Сайт»), «htreviews» — страница табака на htreviews, «нет» — рейтинг без ссылки. Если у табака нет карточки на сайте, при «сайт» рейтинг остаётся без ссылки.' },
   { key: 'show_rating', def: 'да', type: 'yesno',
@@ -609,7 +613,7 @@ export function tx(cfg, lang = 'ru') {
     tooFew: g('too_few'), failed: g('failed'), more: g('btn_more'), newReq: g('btn_new'), stronger: g('btn_stronger'), lighter: g('btn_lighter'),
     strengthLabel: g('strength_label'), strengthWord: g('strength_word'),
     strengthNames: ['', g('strength_1'), g('strength_2'), g('strength_3'), g('strength_4'), g('strength_5')],
-    gram: g('gram'), packNote: (w) => fill(g('pack_note'), { g: w }), packOne: (w) => fill(g('pack_one'), { g: w }), orderHint: g('order_hint'), orderReady: (name) => fill(g('order_ready'), { name }), orderOpen: g('order_open'), noSwear: g('no_swear'), orderBtn: (name) => fill(g('order_btn'), { name }), orderText: g('order_text'), orderTail: g('order_tail'), orderTextMix: (name) => fill(g('order_text_mix'), { name }), packMany: (w) => fill(g('pack_many'), { g: w }), bowlNote: (gr) => fill(g('bowl_note'), { g: gr }), footer: g('footer'),
+    gram: g('gram'), packNote: (w) => fill(g('pack_note'), { g: w }), packOne: (w) => fill(g('pack_one'), { g: w }), packShort: (w) => fill(g('pack_short'), { g: w }), packShortOnly: (w) => fill(g('pack_short_only'), { g: w }), orderHint: g('order_hint'), orderReady: (name) => fill(g('order_ready'), { name }), orderOpen: g('order_open'), noSwear: g('no_swear'), orderBtn: (name) => fill(g('order_btn'), { name }), orderText: g('order_text'), orderTail: g('order_tail'), orderTextMix: (name) => fill(g('order_text_mix'), { name }), packMany: (w) => fill(g('pack_many'), { g: w }), bowlNote: (gr) => fill(g('bowl_note'), { g: gr }), footer: g('footer'),
     llmLang: lang === 'hy' ? 'армянском (восточноармянский литературный, армянским алфавитом)' : 'русском',
   };
 }
@@ -1136,7 +1140,7 @@ async function onText(env, msg, ctx) {
 }
 
 /** /config — коротко, что сейчас действует. */
-const CODE_VERSION = '12.49 · 60 (ссылка на сайт находится и тогда, когда в названии товара на сайте не указана линейка)';
+const CODE_VERSION = '12.50 · 61 (короткие строки состава: без линейки и слова «пачки» — настройка short_lines)';
 export function configSummary(cfg, env = {}, stock = null) {
   const at = cfg._at ? new Date(cfg._at).toLocaleString('ru-RU', { timeZone: 'Europe/Moscow', day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) + ' МСК' : 'ещё не загружалась — работают значения из кода';
   const s = cfg.settings;
@@ -1160,7 +1164,7 @@ export function configSummary(cfg, env = {}, stock = null) {
     `Логотип на картинке: ${s.logo_overlay ? (env.IMAGES ? 'готовый файл' : 'рисует модель (нет привязки IMAGES в wrangler.toml)') : 'рисует модель'}\n` +
     `Стиль картинки: ${esc(s.image_style)} (${mixInstruction(cfg.instruction, s.image_style).fromTable ? 'раздел из таблицы' : 'текст из кода'})\n` +
     stockLine(stock ? { state: 'ok', ...stockStats(stock) } : null) + '\n' +
-    `Крепкое только по запросу: ${yn(s.strong_only_on_request)} · только из наличия: ${yn(s.only_in_stock)} · беречь корзину (маленькие пачки): ${yn(s.prefer_small_packs)} · картинки: ${yn(s.images)} · рейтинг у табаков: ${yn(s.show_rating)}${s.show_rating ? ` (ссылка: ${esc(s.rating_link)})` : ''}\n` +
+    `Крепкое только по запросу: ${yn(s.strong_only_on_request)} · только из наличия: ${yn(s.only_in_stock)} · беречь корзину (маленькие пачки): ${yn(s.prefer_small_packs)} · картинки: ${yn(s.images)} · короткие строки состава: ${yn(s.short_lines)} · рейтинг у табаков: ${yn(s.show_rating)}${s.show_rating ? ` (ссылка: ${esc(s.rating_link)})` : ''}\n` +
     `Админов: ${s.admins.length + String(env.ADMIN_IDS || '').split(',').filter((x) => x.trim()).length}\n\n` +
     'Изменения в таблице подтягиваются сами раз в 15 минут, или сразу — командой /reload.';
 }
@@ -1482,7 +1486,7 @@ async function deliver(env, chat, session, result, { cfg, t, more = false, progr
   const bst = booster;
   const tip = result.some((m) => m.softer)
     ? '\n\n' + esc(t.strengthTip(bst ? `${bst.b}${bst.l && bst.l !== 'Основная' ? ' ' + bst.l : ''} ${bst.n}` : '')) : '';
-  const text = gone + result.map((m, i) => renderMix(m, i, t, { rating: cfg.settings.show_rating, ratingLink: cfg.settings.rating_link })).join('\n\n') + tip +
+  const text = gone + result.map((m, i) => renderMix(m, i, t, { rating: cfg.settings.show_rating, ratingLink: cfg.settings.rating_link, short: cfg.settings.short_lines, keepLine: sameNameKeys(result) })).join('\n\n') + tip +
     '\n\n' + (orders.length ? t.orderHint : t.footer + (shop ? ' ' + shop : ''));
   const kb = resultKeyboard(t, orders, strengthSteps(session.prefs.strength, result));
   const sendMixes = () => send(env, chat, text, kb);
@@ -2113,6 +2117,16 @@ export function mixStrength(parts, words) {
   return avg < 1.5 ? 1 : avg < 2.5 ? 2 : avg < 3.5 ? 3 : avg < 4.5 ? 4 : 5;
 }
 
+/** Табаки подбора, у которых совпадают бренд и название вкуса, а линейки разные: в короткой строке им линейку оставляем. */
+export function sameNameKeys(mixes) {
+  const by = new Map();
+  for (const m of mixes) for (const p of m.parts) {
+    const id = `${p.item.b}|${p.item.n}`.toLowerCase();
+    (by.get(id) || by.set(id, new Set()).get(id)).add(p.item.k);
+  }
+  return new Set([...by.values()].filter((x) => x.size > 1).flatMap((x) => [...x]));
+}
+
 /**
  * Рейтинг табака из справочника — « (4.5★)». Куда ведёт нажатие — настройка rating_link:
  * «сайт» — карточка товара в магазине (it.u, из вкладки «Сайт»), «htreviews» — страница табака там, «нет» — без ссылки.
@@ -2136,10 +2150,17 @@ export function renderMix(m, i, t = 'ru', opts = {}) {
   if (typeof t === 'string') t = tx(DEFAULTS, t);
   const parts = m.parts.map((p) => {
     const it = p.item;
-    const line = it.l && it.l !== 'Основная' ? ' ' + it.l : '';
-    // Фасовка из наличия: «пачка 25 г», «пачки 25 / 100 г», а если есть только большая — «только пачка 200 г».
+    // Короткая строка (настройка short_lines): без линейки и слова «пачки» — «50% Cheddar Cheese · Kraken · 30/100 г (4.2★)»,
+    // иначе на телефоне каждая строка рвётся на две. Линейку оставляем только там, где без неё два табака в подборе не различить
+    // (один и тот же вкус в двух линейках бренда) — opts.keepLine.
+    const short = !!opts.short;
+    const line = it.l && it.l !== 'Основная' && (!short || (opts.keepLine && opts.keepLine.has(it.k))) ? ' ' + it.l : '';
+    // Фасовка из наличия: «пачка 25 г», «пачки 25 / 100 г», а если есть только большая — «только пачка 200 г»; коротко — «25 г», «25/100 г», «только 200 г».
     const w = Array.isArray(it.w) ? [...new Set(it.w)].sort((a, b) => a - b) : [];
-    const pack = !w.length ? '' : ` · <i>${esc(w.length > 1 ? t.packMany(w.join(' / ')) : w[0] > 40 ? t.packNote(w[0]) : t.packOne(w[0]))}</i>`;
+    const packText = !w.length ? '' : short
+      ? (w.length > 1 ? t.packShort(w.join('/')) : w[0] > 40 ? t.packShortOnly(w[0]) : t.packShort(w[0]))
+      : (w.length > 1 ? t.packMany(w.join(' / ')) : w[0] > 40 ? t.packNote(w[0]) : t.packOne(w[0]));
+    const pack = packText ? ` · <i>${esc(packText)}</i>` : '';
     return `${p.p}%\u2002<b>${esc(it.n)}</b> · ${esc(it.b + line)}${pack}${opts.rating ? ratingLink(it, opts.ratingLink) : ''}`;
   });
   // Крепость — пятью точками в строке названия: ●●○○○. Если числа нет (старые данные) — словами отдельной строкой.
