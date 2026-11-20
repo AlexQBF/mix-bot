@@ -82,7 +82,7 @@ export const DEFAULT_TEXTS = {
   order_ready: ['Заказ на «{name}» готов. Нажми кнопку — откроется чат с менеджером, текст уже вписан, останется отправить 👇', '«{name}» պատվերը պատրաստ է։ Սեղմիր կոճակը՝ կբացվի զրույց մենեջերի հետ, տեքստն արդեն գրված է, մնում է ուղարկել 👇',
     'Ответ после нажатия «Заказать»'],
   order_open: ['✍️ Написать менеджеру', '✍️ Գրել մենեջերին', 'Кнопка, которая открывает чат с менеджером'],
-  order_btn: ['{name}', '{name}', 'Кнопка заказа под миксами; {name} — эмодзи и название микса'],
+  order_btn: ['{name}', '{name}', 'Кнопка заказа под миксами; {name} — эмодзи микса'],
   order_text: ['Здравствуйте! Хочу заказать табаки для микса «{name}»:', 'Բարև Ձեզ։ Ուզում եմ պատվիրել ծխախոտներ «{name}» միքսի համար․', 'Первая строка готового сообщения менеджеру'],
   pack_one: ['пачка {g} г', '{g} գ տուփ', 'Пометка у табака: в какой пачке он есть; {g} — вес пачки'],
   pack_many: ['пачки {g} г', 'տուփեր՝ {g} գ', 'Пометка у табака, если есть несколько пачек; {g} — веса через «/»'],
@@ -1097,7 +1097,7 @@ async function onText(env, msg, ctx) {
 }
 
 /** /config — коротко, что сейчас действует. */
-const CODE_VERSION = '12.39 · 50 (рейтинг табака со ссылкой на htreviews в составе микса — настройка show_rating)';
+const CODE_VERSION = '12.40 · 51 (кнопки выбора микса — одной строкой, эмодзи; рейтинг табака со ссылкой — настройка show_rating)';
 export function configSummary(cfg, env = {}, stock = null) {
   const at = cfg._at ? new Date(cfg._at).toLocaleString('ru-RU', { timeZone: 'Europe/Moscow', day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) + ' МСК' : 'ещё не загружалась — работают значения из кода';
   const s = cfg.settings;
@@ -1282,7 +1282,7 @@ function resultKeyboard(t, orders = [], steps = {}) {
     { text: t.more, callback_data: 'more' },
   ];
   return { inline_keyboard: [
-    ...orders.map((o) => [{ text: o.text, url: o.url }]),
+    ...(orders.length ? [orders.map((o) => ({ text: o.text, url: o.url }))] : []),
     quick,
     [{ text: t.newReq, callback_data: 'new' }],
   ] };
@@ -1307,8 +1307,8 @@ export function orderButtons(mixes, t, contact) {
     let url = link(true);
     if (url.length > 1900) url = link(false); // слишком длинная ссылка — без названий линеек
     if (url.length > 1900) url = `https://t.me/${user}?text=` + encodeURIComponent(t.orderText(title));
-    const nice = m.title.charAt(0).toLocaleUpperCase('ru') + m.title.slice(1);
-    return { text: t.orderBtn(`${m.emoji ? m.emoji + ' ' : ''}${nice}`).slice(0, 60), url, title };
+    // На кнопке — только эмодзи микса (тот же, что перед его названием): три кнопки помещаются в одну строку.
+    return { text: t.orderBtn(m.emoji || String(mixes.indexOf(m) + 1)).slice(0, 60), url, title };
   });
 }
 
@@ -1823,7 +1823,7 @@ export function withBase(parts, base, step, minParts = 2) {
   return [{ ...parts[0], p: 100 - rest.reduce((a, p) => a + p.p, 0) }, ...rest].sort((a, b) => b.p - a.p);
 }
 
-const EMOJI_FALLBACK = ['🔸', '🔹', '▫️'];
+const EMOJI_FALLBACK = ['🟠', '🔵', '🟢'];
 /** Первый эмодзи из ответа ИИ (или пусто, если там не эмодзи). */
 export function oneEmoji(x) {
   const m = String(x || '').match(/\p{Extended_Pictographic}(?:\uFE0F|\u200D\p{Extended_Pictographic}|\p{Emoji_Modifier})*/u);
@@ -1888,6 +1888,12 @@ export function validateMixes(out, candidates, cfg = DEFAULTS, asked = new Set()
       // Тогда под миксами будет одна строка про крепкую основу. Во всех остальных случаях ничего не пишем.
       softer: want === 'strong' && avg < STRONG_FROM && parts.some((p) => off.has(p.item.k) && effStrength(p.item, st.strong_words) <= 3),
     });
+  }
+  // У каждого микса свой эмодзи: по нему клиент выбирает микс на кнопке. Повтор заменяем запасным значком.
+  const seen = new Set();
+  for (const m of res) {
+    if (seen.has(m.emoji)) m.emoji = EMOJI_FALLBACK.find((e) => !seen.has(e)) || m.emoji;
+    seen.add(m.emoji);
   }
   return res;
 }
