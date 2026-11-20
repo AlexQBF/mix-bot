@@ -1136,7 +1136,7 @@ async function onText(env, msg, ctx) {
 }
 
 /** /config — коротко, что сейчас действует. */
-const CODE_VERSION = '12.47 · 58 (ссылки на сайт магазина: рейтинг ведёт на карточку товара, вкладка «Сайт», настройка rating_link)';
+const CODE_VERSION = '12.49 · 60 (ссылка на сайт находится и тогда, когда в названии товара на сайте не указана линейка)';
 export function configSummary(cfg, env = {}, stock = null) {
   const at = cfg._at ? new Date(cfg._at).toLocaleString('ru-RU', { timeZone: 'Europe/Moscow', day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) + ' МСК' : 'ещё не загружалась — работают значения из кода';
   const s = cfg.settings;
@@ -3128,12 +3128,19 @@ export function matchStock(positions, catalog, map = {}, site = null) {
     if (!siteKeys) {
       siteKeys = new Map();
       for (const x of site.entries) {
-        const hit = [...new Set(x.e.names.flatMap((v) => index.get(x.e.brand + '|' + squash(v)) || []))]
-          .map((it) => ({ it, line: lineScore(x.e.line, it.l) })).sort((a, b) => (a.it.o ? 1 : 0) - (b.it.o ? 1 : 0) || b.line - a.line || (b.it.c || 0) - (a.it.c || 0))[0];
-        if (hit && hit.line > -3 && !siteKeys.has(hit.it.k + '|' + x.e.weight)) siteKeys.set(hit.it.k + '|' + x.e.weight, x.url);
+        const hits = [...new Set(x.e.names.flatMap((v) => index.get(x.e.brand + '|' + squash(v)) || []))];
+        const hit = hits.map((it) => ({ it, line: lineScore(x.e.line, it.l) })).sort((a, b) => (a.it.o ? 1 : 0) - (b.it.o ? 1 : 0) || b.line - a.line || (b.it.c || 0) - (a.it.c || 0))[0];
+        if (!hit) continue;
+        // Линейка в названии товара на сайте не указана («Хулиган 25 г ТРОПИЧЕСКИЙ ПЕРСИК (НЕО)», а это линейка «Поп»).
+        // Если вкус с таким названием у бренда один — это он и есть; если их несколько в разных линейках — без линейки не угадываем.
+        const real = hits.filter((it) => !it.o);
+        const only = !x.e.line && (real.length ? real : hits).length === 1;
+        if (hit.line <= -3 && !only) continue;
+        if (!siteKeys.has(hit.it.k + '|' + x.e.weight)) siteKeys.set(hit.it.k + '|' + x.e.weight, x.url);
+        (siteKeys.get(hit.it.k) || siteKeys.set(hit.it.k, []).get(hit.it.k)).push({ weight: x.e.weight, url: x.url });
       }
     }
-    return siteKeys.get(key + '|' + weight) || '';
+    return weight === undefined ? siteKeys.get(key) || [] : siteKeys.get(key + '|' + weight) || '';
   };
   for (const pos of positions) {
     const e = stockEntry(pos, brandNames);
@@ -3155,7 +3162,7 @@ export function matchStock(positions, catalog, map = {}, site = null) {
         if (k2) { key = k2; who = ownKeys.has(k2) ? 'своя карточка (ИИ)' : extraKeys.has(k2) ? 'прямая ссылка htreviews' : 'по названию'; } else if (key === undefined) who = 'по названию';
       }
       done.set(e.id, key);
-      pairs.set(e.id, { pos: `${e.brand} | ${e.line} | ${e.flavor}`, key: key || '', who: key === undefined ? 'ждёт разбора ИИ' : who, w: [], site: [] });
+      pairs.set(e.id, { pos: `${e.brand} | ${e.line} | ${e.flavor}`, key: key || '', who: key === undefined ? 'ждёт разбора ИИ' : who, w: [], site: [], e });
       if (!key) unmatched.push({ id: e.id, brand: e.brand, line: e.line, flavor: e.flavor, tried: key === '' });
     }
     const key = done.get(e.id);
@@ -3172,7 +3179,21 @@ export function matchStock(positions, catalog, map = {}, site = null) {
   for (const k of Object.keys(items)) items[k].sort((a, b) => a - b);
   // Одна ссылка на табак — на самую маленькую пачку: её бот и советует.
   for (const k of Object.keys(links)) links[k] = links[k].sort((a, b) => a[0] - b[0])[0][1];
-  return { items, unmatched, tobaccos, pairs: [...pairs.values()], links, packs, linked };
+  // Ни одной фасовки позиции на сайте нет, но сам табак там продаётся в другой пачке — берём её карточку.
+  // other — фасовки без своей карточки, у которых на сайте есть тот же табак в другой пачке.
+  let other = 0;
+  if (site) {
+    for (const pr of pairs.values()) {
+      if (pr.site.length) { other += pr.w.length - pr.site.length; continue; }
+      const alt = siteOtherPack(site, pr.e, pr.w, pr.key ? siteByKey(pr.key) : []);
+      if (!alt) continue;
+      pr.alt = alt;
+      other += pr.w.length;
+      if (pr.key && !links[pr.key]) links[pr.key] = alt[1];
+    }
+  }
+  for (const pr of pairs.values()) delete pr.e;
+  return { items, unmatched, tobaccos, pairs: [...pairs.values()], links, packs, linked, other };
 }
 
 const TAB_RETRY_MS = 3600e3;
@@ -3190,7 +3211,8 @@ export function matchRow(p, it) {
     real && it.c > 0 && it.r > 0 ? it.r : '',
     real ? it.c || 0 : '',
     real ? `${SOURCE}/tobaccos/${it.k}` : '',
-    (p.site || []).slice().sort((a, b) => a[0] - b[0]), // [[вес, ссылка на сайт магазина], …]
+    // [[вес, ссылка на сайт магазина], …]; если этих фасовок на сайте нет — карточка другой пачки того же табака с пометкой 'other'.
+    (p.site || []).length ? p.site.slice().sort((a, b) => a[0] - b[0]) : p.alt ? [[p.alt[0], p.alt[1], 'other']] : [],
   ];
 }
 
@@ -3211,7 +3233,7 @@ export function siteEntry(title, brandNames) {
 
 /** Каталог сайта → два указателя: по точному названию позиции и по бренду + вкусу + весу. */
 export function siteIndex(rows, brandNames) {
-  const byId = new Map(), byName = new Map(), entries = [];
+  const byId = new Map(), byName = new Map(), byTaste = new Map(), entries = [];
   let size = 0;
   for (const r of rows || []) {
     const url = String((r && r[1]) || '').trim();
@@ -3225,9 +3247,11 @@ export function siteIndex(rows, brandNames) {
     for (const v of e.names) {
       const k = e.brand + '|' + squash(v) + '|' + e.weight;
       (byName.get(k) || byName.set(k, []).get(k)).push(rec);
+      const any = e.brand + '|' + squash(v);
+      (byTaste.get(any) || byTaste.set(any, []).get(any)).push({ url, line: e.line, weight: e.weight });
     }
   }
-  return { byId, byName, entries, size };
+  return { byId, byName, byTaste, entries, size };
 }
 
 /** Ссылка на карточку товара для позиции склада e в фасовке weight. Пусто — на сайте такой нет. */
@@ -3239,6 +3263,20 @@ export function siteUrl(idx, e, weight) {
   if (!cands.length) return '';
   const best = cands.map((r) => ({ r, s: squash(r.line) === squash(e.line) ? 99 : lineScore(e.line, r.line) })).sort((a, b) => b.s - a.s)[0];
   return best.s > -3 ? best.r.url : ''; // явно другая линейка (Strong ↔ Medium) — это другой товар
+}
+
+/**
+ * Этой фасовки на сайте нет, но тот же табак продаётся в другой пачке (на складе 25 г, на сайте только 200 г) —
+ * отдаём карточку ближайшей по весу пачки: [вес, ссылка]. null — табака на сайте нет вовсе.
+ */
+export function siteOtherPack(idx, e, weights, extra = []) {
+  const byName = [...new Set(e.names.flatMap((v) => idx.byTaste.get(e.brand + '|' + squash(v)) || []))]
+    .filter((r) => squash(r.line) === squash(e.line) || lineScore(e.line, r.line) > -3);
+  const all = [...byName, ...extra];
+  if (!all.length) return null;
+  const near = (w) => Math.min(...weights.map((x) => Math.abs(x - w)));
+  const best = all.sort((a, b) => near(a.weight) - near(b.weight) || a.weight - b.weight)[0];
+  return [best.weight, best.url];
 }
 
 /** Каталог сайта из вкладки «Сайт» — только наши бренды, только название и ссылка. */
@@ -3265,7 +3303,7 @@ export async function syncStock(env, rows, cfg, force = false) {
   const map = (await env.KV.get('stockmap', 'json').catch(() => null)) || {};
   const catmeta = await env.KV.get('catmeta').catch(() => null);
   // Дешёвая проверка до разбора: та же выгрузка, те же ответы ИИ, тот же справочник, тот же день — ничего не делаем.
-  const hash = quickHash(JSON.stringify(rows || [])) + ':' + Object.keys(map).length + ':t3:' + ((rows && rows.siteRev) || '') + ':' +
+  const hash = quickHash(JSON.stringify(rows || [])) + ':' + Object.keys(map).length + ':t5:' + ((rows && rows.siteRev) || '') + ':' +
     quickHash(String(catmeta || '')) + ':' + new Date().toISOString().slice(0, 10);
   // …кроме случая, когда в прошлый раз не удалось записать вкладку «Соответствия»: тогда пробуем ещё раз.
   // И если в таблице ещё старый скрипт Google (вкладка без рейтинга и ссылок) — раз в час проверяем, не обновили ли его.
@@ -3285,7 +3323,7 @@ export async function syncStock(env, rows, cfg, force = false) {
   const res = matchStock(positions, catalog, map, site);
   const origin = (Object.values(res.links)[0] || '').replace(/^(https:\/\/[^/]+).*$/, '$1');
   const stock = { at: new Date().toISOString(), hash, positions: positions.length, tobaccos: res.tobaccos, items: res.items, unmatched: res.unmatched,
-    site: { state: siteRows.state, total: site ? site.size : 0, packs: res.packs, linked: res.linked, origin,
+    site: { state: siteRows.state, total: site ? site.size : 0, packs: res.packs, linked: res.linked, other: res.other, origin,
       links: Object.fromEntries(Object.entries(res.links).map(([k, u]) => [k, origin && u.startsWith(origin + '/') ? u.slice(origin.length) : u])) } };
   await env.KV.put('stock', JSON.stringify(stock));
   // Вкладка «Соответствия»: что с чем склеено, рейтинг, число оценок и ссылка на htreviews. Пишем, только когда что-то пересчитали.
@@ -3381,8 +3419,9 @@ export function stockReport(stock, catmeta = null) {
   const site = stock.site;
   if (site) {
     s += '\n\n🔗 Сайт: ' + (site.state === 'ok'
-      ? `карточка на сайте есть у ${site.linked} из ${site.packs} фасовок (в выгрузке сайта ${site.total} товаров наших брендов).` +
-        (site.linked < site.packs ? ' У кого нет — пустая колонка «Сайт» во вкладке «Соответствия».' : '')
+      ? `своя карточка на сайте есть у ${site.linked} из ${site.packs} фасовок` +
+        (site.other ? `; ещё у ${site.other} своей карточки нет, но тот же табак есть на сайте в другой пачке` : '') +
+        `. Табака нет на сайте совсем: ${Math.max(0, site.packs - site.linked - (site.other || 0))} фасовок (пустая колонка «Сайт» во вкладке «Соответствия»). В выгрузке сайта ${site.total} товаров наших брендов.`
       : site.state === 'notab' ? 'вкладки «Сайт» нет или она пустая — ссылок на сайт нет. Загрузите в неё выгрузку каталога из Тильды.'
       : site.state === 'oldscript' ? 'в таблице старая версия скрипта Google — ссылок на сайт нет. Обновите скрипт и пришлите /stock.'
       : site.state === 'error' ? 'не получилось прочитать вкладку «Сайт» — ссылок на сайт нет. Попробуйте /stock ещё раз.' : 'ссылки не подключены.');
