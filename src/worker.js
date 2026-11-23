@@ -1149,7 +1149,7 @@ async function onText(env, msg, ctx) {
 }
 
 /** /config — коротко, что сейчас действует. */
-const CODE_VERSION = '12.52 · 63 (длинные сообщения не вешают бота · страховка от зависаний)';
+const CODE_VERSION = '12.54 · 65 (табак «назван клиентом» — только с подтверждением ИИ · три разных по вкусу микса)';
 export function configSummary(cfg, env = {}, stock = null) {
   const at = cfg._at ? new Date(cfg._at).toLocaleString('ru-RU', { timeZone: 'Europe/Moscow', day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) + ' МСК' : 'ещё не загружалась — работают значения из кода';
   const s = cfg.settings;
@@ -1964,6 +1964,9 @@ export function composePrompt(cfg, lang = 'ru') {
     (st.base_share ? `- В каждом миксе один табак — база: его доля не меньше ${st.base_share}%. Остальные табаки — дополнения к базе: подбирай их под её вкус, чтобы они подчёркивали или оттеняли базу, а не спорили с ней.\n` : '') +
     (st.no_repeats ? '- Каждый табак — только в одном из трёх миксов (кроме отмеченных ★).\n' : '') +
     '- Табаки с пометкой ★ клиент назвал сам: такой табак должен быть в КАЖДОМ из трёх миксов, в разных сочетаниях.\n' +
+    '- Три микса должны отличаться по вкусу, а не только брендами и долями. То, что клиент просил, есть во всех трёх, но вокруг этого — три разные идеи ' +
+      '(например, к манго с маракуйей: в одном цитрус, в другом ягоды, в третьем сливки или травы). Один и тот же набор вкусов, собранный в двух миксах ' +
+      'разными табаками или с другой базой, — это повтор, так нельзя. Освежающий акцент (лёд, холодок, мята), если клиент его просил, может быть во всех трёх.\n' +
     '- title и text пиши на ' + t.llmLang + ' языке. Названия брендов и табаков не переводи.\n' +
     '- strength — итоговая крепость микса числом от 1 до 5 (1 лёгкая, 2 средне-лёгкая, 3 средняя, 4 средне-крепкая, 5 крепкая), с учётом инструкции.\n' +
     '- У каждого табака "look" НА АНГЛИЙСКОМ: густой глянцевый соус цвета этого вкуса с его натуральной фактурой, 4–8 слов ("glossy deep purple blackberry jam with seeds", "frosty mint sauce with tiny herb flecks", "icy pale blue glaze with sugar crystals"). Гладкой однотонной заливки без фактуры быть не должно.\n' +
@@ -2080,7 +2083,11 @@ export function askedKeys(candidates, prefs, text = '') {
   const tags = new Set(candidates.flatMap((it) => [...(it.t || []), ...(it.g || [])]).map((x) => squash(x)));
   const generic = (it) => tags.has(squash(it.n)) || (!!it.a && tags.has(squash(it.a)));
   const flavors = (prefs && prefs.flavors) || [];
-  const hits = candidates.filter((it) => !generic(it) && (inText(it.n, it) || inText(it.a, it) ||
+  // Двойная проверка: название есть в тексте клиента И разбор запроса (ИИ) сам отметил этот табак как названный.
+  // Одного совпадения по тексту мало: «свежий фреш» латиницей — fresh, а это на одну букву от табака Satyr «Flesh»,
+  // и бот ставил гранатовый Flesh во все три микса. ИИ понимает, что «фреш» — описание, а «с Кэтминтом» — табак.
+  const named = (it) => flavors.some((f) => [it.n, it.a].some((x) => x && (sameName(f, x) || similarName(f, x))));
+  const hits = candidates.filter((it) => !generic(it) && named(it) && (inText(it.n, it) || inText(it.a, it) ||
     flavors.some((f) => flavorOk(f, it) && (sameName(f, it.n) || (it.a && sameName(f, it.a))))));
   // Больше двух обязательных табаков в каждом миксе — уже не микс: оставляем два самых рейтинговых.
   // Один и тот же вкус в разных линейках («Cookie» Medium и «Cookie» Strong) — это один названный табак, а не два:
@@ -2291,11 +2298,14 @@ async function llm(env, system, user, maxTokens, json = false) {
   if (provider === 'openai' && !env.LLM_BASE_URL) {
     // Модели GPT-6 «думают» перед ответом: effort — сколько. low — хороший баланс для миксов, none — для простого разбора.
     // strict — просим у OpenAI ответ строго в виде JSON: тогда он не может прислать «почти JSON» с лишней кавычкой или оборванный.
+    // Строгий режим JSON OpenAI включает, только если слово «JSON» есть в самом сообщении (input), а не только в инструкции.
+    // Без него сервер отвечал ошибкой 400, бот повторял запрос в обычном режиме — и модель иногда ломала формат.
+    const input = json && !/json/i.test(user) ? user + '\n\nОтвет верни в формате JSON.' : user;
     const call = async (effort, strict = json) => {
       const r = await fetchTimed('https://api.openai.com/v1/responses', {
         method: 'POST',
         headers: { authorization: 'Bearer ' + env.LLM_API_KEY, 'content-type': 'application/json' },
-        body: JSON.stringify({ model, instructions: system, input: user, reasoning: { effort },
+        body: JSON.stringify({ model, instructions: system, input, reasoning: { effort },
           ...(strict ? { text: { format: { type: 'json_object' } } } : {}),
           max_output_tokens: maxTokens + (effort === 'none' ? 0 : 6000) }),
       }, env.LLM_TIMEOUT_MS || LLM_TIMEOUT, 'openai');
@@ -2304,7 +2314,11 @@ async function llm(env, system, user, maxTokens, json = false) {
     const effort = env.LLM_EFFORT || env.OPENAI_EFFORT || 'low';
     let { r, j } = await call(effort);
     // Модель не приняла режим JSON — повторяем как раньше, без него.
-    if (!r.ok && json && /format|json_object|text\./i.test(JSON.stringify(j))) ({ r, j } = await call(effort, false));
+    if (!r.ok && json && /format|json_object|text\./i.test(JSON.stringify(j))) {
+      // Так быть не должно — сообщаем админам точную причину (не чаще раза в 10 минут), запрос всё равно выполняем.
+      await reportProblem(env, 'jsonmode', '⚠️ OpenAI не принял строгий режим JSON, отвечаю в обычном (формат может ломаться):\n' + JSON.stringify(j).slice(0, 400));
+      ({ r, j } = await call(effort, false));
+    }
     // Модель не умеет effort=none (например, GPT-6.1 Sol) — повторяем с low.
     if (!r.ok && effort === 'none' && /effort|reasoning/i.test(JSON.stringify(j))) ({ r, j } = await call('low'));
     if (!r.ok) throw new Error('openai ' + r.status + ' ' + JSON.stringify(j).slice(0, 400));
@@ -2350,7 +2364,9 @@ async function llmJson(env, system, user, maxTokens) {
   const json = parseJson(text);
   if (!json) {
     console.log('llm bad json', String(text).slice(0, 500));
-    await reportProblem(env, 'llmjson', `⚠️ ИИ ответил не в том формате (${who}), длина ответа ${String(text).length} зн. Обычно бот сразу спрашивает ещё раз, и клиент миксы получает.\nНачало:\n${String(text).slice(0, 250)}\n…\nКонец:\n${String(text).slice(-200)}`);
+    const where = jsonErrorAt(text);
+    await reportProblem(env, 'llmjson', `⚠️ ИИ ответил не в том формате (${who}), длина ответа ${String(text).length} зн. Обычно бот сразу спрашивает ещё раз, и клиент миксы получает.\n` +
+      (where ? `Сломано на ${where.pos}-м знаке (${where.msg}):\n…${where.before}⟦здесь⟧${where.after}…` : `Начало:\n${String(text).slice(0, 250)}\n…\nКонец:\n${String(text).slice(-200)}`));
   }
   return json;
 }
@@ -2365,6 +2381,20 @@ async function reportProblem(env, kind, text) {
     await env.KV.put('problem:' + kind, '1', { expirationTtl: 600 });
     await notifyAdmins(env, text.slice(0, 3500));
   } catch (e) { console.log('reportProblem', e.message); }
+}
+
+/** Где именно сломан JSON: номер знака, причина и по 80 знаков вокруг. null — не удалось определить. */
+export function jsonErrorAt(text) {
+  const s = String(text || '');
+  const a = s.indexOf('{');
+  if (a < 0) return null;
+  const body = s.slice(a, s.lastIndexOf('}') + 1 || undefined);
+  try { JSON.parse(body); return null; } catch (e) {
+    const m = String(e.message).match(/position (\d+)/);
+    if (!m) return { pos: '?', msg: String(e.message).slice(0, 120), before: body.slice(-80), after: '' };
+    const p = Number(m[1]);
+    return { pos: a + p + 1, msg: String(e.message).replace(/\s*in JSON at position.*$/, '').slice(0, 120), before: body.slice(Math.max(0, p - 80), p), after: body.slice(p, p + 80) };
+  }
 }
 
 /** Модели любят обернуть JSON в текст или ```json — достаём сам объект. */
