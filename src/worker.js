@@ -76,6 +76,9 @@ export const DEFAULT_TEXTS = {
   noaroma_absent: ['В этих миксах безаромки и так нет 👆', 'Այս միքսերում առանց բույրի ծխախոտ առանց այն էլ չկա 👆', 'Клиент попросил убрать безаромку, а её в составе нет'],
   noaroma_already: ['Безаромка уже есть в этих миксах 👆', 'Առանց բույրի ծխախոտն արդեն կա այս միքսերում 👆', 'Клиент попросил добавить безаромку, а она уже в составе'],
   no_swear: ['Давай без мата 🙂 Напиши то же самое спокойно — и я подберу миксы.', 'Խնդրում եմ առանց հայհոյանքների 🙂 Գրիր նույնը հանգիստ, և ես միքսեր կընտրեմ։', 'Ответ на сообщение с матом'],
+  stuck: ['😔 Не получилось подобрать миксы — что-то пошло не так на нашей стороне. Напиши запрос ещё раз, пожалуйста.',
+    '😔 Չստացվեց միքսեր ընտրել՝ մեր կողմից ինչ-որ բան սխալ գնաց։ Խնդրում եմ, նորից գրիր հարցումը։',
+    'Вместо «Подбираю миксы…», если подбор оборвался и бот замолчал (страховка от зависаний)'],
   order_hint: ['Какой берём? 👇', 'Ո՞րն ենք վերցնում 👇', 'Строка перед кнопками миксов: нажатие открывает чат с менеджером с готовым текстом заказа'],
   order_ready: ['Заказ на «{name}» готов. Нажми кнопку — откроется чат с менеджером, текст уже вписан, останется отправить 👇', '«{name}» պատվերը պատրաստ է։ Սեղմիր կոճակը՝ կբացվի զրույց մենեջերի հետ, տեքստն արդեն գրված է, մնում է ուղարկել 👇',
     'Ответ после нажатия «Заказать»'],
@@ -611,7 +614,7 @@ export function tx(cfg, lang = 'ru') {
     strengthDefault: g('strength_default'),
     outOfStock: (name) => fill(g('out_of_stock'), { name }), noAromaNone: g('noaroma_none'), noAromaAlready: g('noaroma_already'), noAromaAbsent: g('noaroma_absent'),
     strengthTip: (base) => (base ? fill(g('strength_tip'), { base }) : g('strength_tip_nobase')),
-    tooFew: g('too_few'), failed: g('failed'), more: g('btn_more'), newReq: g('btn_new'), stronger: g('btn_stronger'), lighter: g('btn_lighter'),
+    tooFew: g('too_few'), failed: g('failed'), stuck: g('stuck'), more: g('btn_more'), newReq: g('btn_new'), stronger: g('btn_stronger'), lighter: g('btn_lighter'),
     strengthLabel: g('strength_label'), strengthWord: g('strength_word'),
     strengthNames: ['', g('strength_1'), g('strength_2'), g('strength_3'), g('strength_4'), g('strength_5')],
     gram: g('gram'), packNote: (w) => fill(g('pack_note'), { g: w }), packOne: (w) => fill(g('pack_one'), { g: w }), packShort: (w) => fill(g('pack_short'), { g: w }), packShortFrom: (w) => fill(g('pack_short_from'), { g: w }), packShortOnly: (w) => fill(g('pack_short_only'), { g: w }), orderHint: g('order_hint'), orderReady: (name) => fill(g('order_ready'), { name }), orderOpen: g('order_open'), noSwear: g('no_swear'), orderBtn: (name) => fill(g('order_btn'), { name }), orderText: g('order_text'), orderTail: g('order_tail'), orderTextMix: (name) => fill(g('order_text_mix'), { name }), packMany: (w) => fill(g('pack_many'), { g: w }), bowlNote: (gr) => fill(g('bowl_note'), { g: gr }), footer: g('footer'),
@@ -713,6 +716,8 @@ export default {
 
 /** Раз в 15 минут: таблица → копия; новый бренд без вкусов → скачать (по одному за раз). */
 async function cronConfig(env) {
+  // Сначала — зависшие подборы: это клиенты, которые прямо сейчас ждут ответа.
+  await checkStuck(env).catch((e) => console.log('stuck', e.message));
   const r = await syncConfig(env, fetch, true);
   // Разовый сбой Google — не повод писать админам: молчим, пока таблица не читается три проверки подряд (45 минут).
   const fails = Number(await env.KV.get('config:fails').catch(() => 0)) || 0;
@@ -894,7 +899,10 @@ async function onWebhook(request, env, ctx) {
     } catch (e) {
       console.log('handler', e && e.stack || e);
       const chat = (update.message || (update.callback_query && update.callback_query.message) || {}).chat;
-      if (chat) await send(env, chat.id, (await txt(env, await getLang(env, chat.id))).error).catch(() => {});
+      if (chat) {
+        await busyClear(env, chat.id); // клиенту уже ответили «что-то пошло не так» — страховке писать незачем
+        await send(env, chat.id, (await txt(env, await getLang(env, chat.id))).error).catch(() => {});
+      }
     }
   })();
   // Telegram ждёт ответа не вечно. Если он повесил трубку, Cloudflare обрывает работу на полуслове —
@@ -1141,7 +1149,7 @@ async function onText(env, msg, ctx) {
 }
 
 /** /config — коротко, что сейчас действует. */
-const CODE_VERSION = '12.51 · 62 (в короткой строке состава — только самая маленькая пачка)';
+const CODE_VERSION = '12.52 · 63 (длинные сообщения не вешают бота · страховка от зависаний)';
 export function configSummary(cfg, env = {}, stock = null) {
   const at = cfg._at ? new Date(cfg._at).toLocaleString('ru-RU', { timeZone: 'Europe/Moscow', day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) + ' МСК' : 'ещё не загружалась — работают значения из кода';
   const s = cfg.settings;
@@ -1409,7 +1417,54 @@ async function startProgress(env, chat, first, phrases, note = '') {
       }
     })();
   }
-  return { stop: async (remove = true) => { done = true; if (id && remove) await tg(env, 'deleteMessage', { chat_id: chat, message_id: id }).catch(() => {}); } };
+  return { id, stop: async (remove = true) => { done = true; if (id && remove) await tg(env, 'deleteMessage', { chat_id: chat, message_id: id }).catch(() => {}); } };
+}
+
+/* ───── Страховка от зависаний ─────
+ * Пока идёт подбор, в KV лежит отметка busy:<чат> с временем последнего «признака жизни» и шагом.
+ * Шаги: подбор табаков → сборка миксов ИИ → картинка. Перед каждым долгим шагом отметка обновляется, после ответа клиенту — снимается.
+ * Если Cloudflare оборвал работу на полуслове, отметка остаётся. Проверка раз в 15 минут находит отметки старше STUCK_MS:
+ * клиенту вместо вечного «Подбираю миксы…» пишет, чтобы повторил запрос, админам — кто, когда и на каком шаге завис.
+ * Все операции с отметкой — «мягкие»: если KV не записался (дневной лимит), подбор от этого не ломается.
+ */
+const STUCK_MS = 90 * 1000; // 1,5 минуты без признаков жизни — считаем, что подбор оборвался
+function busyStart(env, chat, lang, text, pid) {
+  return { env, chat, lang, text: String(text || '').replace(/\s+/g, ' ').slice(0, 300), pid: pid || 0, t0: Date.now(), at: 0, stage: '' };
+}
+async function busyBeat(bz, stage) {
+  if (!bz) return;
+  bz.stage = stage;
+  bz.at = Date.now();
+  const { env, ...data } = bz;
+  await env.KV.put('busy:' + bz.chat, JSON.stringify(data), { expirationTtl: 3600 }).catch((e) => console.log('busy', e.message));
+}
+async function busyClear(env, chat) {
+  await env.KV.delete('busy:' + chat).catch(() => {});
+}
+
+/** Раз в 15 минут: подборы, которые замолчали дольше 1,5 минуты, — извиняемся перед клиентом и сообщаем админам. */
+export async function checkStuck(env) {
+  const list = await env.KV.list({ prefix: 'busy:' }).catch(() => null);
+  if (!list || !list.keys || !list.keys.length) return [];
+  const cfg = await loadConfig(env);
+  const stuck = [];
+  for (const k of list.keys) {
+    const b = await env.KV.get(k.name, 'json').catch(() => null);
+    if (!b || Date.now() - (b.at || 0) < STUCK_MS) continue;
+    await env.KV.delete(k.name).catch(() => {});
+    const t = tx(cfg, b.lang === 'hy' ? 'hy' : 'ru');
+    // Меняем «Подбираю миксы…» на извинение; не получилось (сообщение удалено) — пишем отдельным сообщением.
+    const ed = b.pid ? await tg(env, 'editMessageText', { chat_id: b.chat, message_id: b.pid, text: esc(t.stuck), parse_mode: 'HTML' }) : null;
+    if (!ed || !ed.ok) await send(env, b.chat, esc(t.stuck));
+    stuck.push(b);
+  }
+  if (stuck.length) {
+    const when = (ms) => new Date(ms).toLocaleString('ru-RU', { timeZone: 'Europe/Moscow', day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
+    await notifyAdmins(env, ('⏳ Подбор оборвался, клиент не получил миксы. Клиенту я написал, чтобы повторил запрос.\n' +
+      stuck.map((b) => `• ${when(b.t0)} МСК, чат ${b.chat}, шаг: ${b.stage || '—'}, запрос: «${b.text}»`).join('\n') +
+      '\nЕсли повторяется — пришлите это сообщение разработчику.').slice(0, 3800));
+  }
+  return stuck;
 }
 
 async function makeMixes(env, chat, session, more = false, lang = 'ru', note = '', t0 = Date.now()) {
@@ -1421,6 +1476,8 @@ async function makeMixes(env, chat, session, more = false, lang = 'ru', note = '
   if (!catalog.length) return send(env, chat, t.noCatalog);
 
   const progress = await startProgress(env, chat, more ? t.pickingMore : t.picking, t.progress, note);
+  const bz = busyStart(env, chat, lang, session.text, progress.id);
+  await busyBeat(bz, 'подбор табаков');
   await action(env, chat, 'typing');
 
   // Клиент назвал табак, которого сейчас нет в наличии: не отказываем, а подбираем похожее по вкусу.
@@ -1446,13 +1503,14 @@ async function makeMixes(env, chat, session, more = false, lang = 'ru', note = '
     }
   }
   const candidates = pickCandidates(catalog, session.prefs, session.used || [], more, cfg);
-  if (candidates.length < 4) { await progress.stop(false); return send(env, chat, t.tooFew, resultKeyboard(t)); }
+  if (candidates.length < 4) { await progress.stop(false); await busyClear(env, chat); return send(env, chat, t.tooFew, resultKeyboard(t)); }
 
   const tc = Date.now();
+  await busyBeat(bz, 'сборка миксов (ИИ)');
   let result = await composeMixes(env, session, candidates, lang, cfg);
-  if (!result.length) result = await composeMixes(env, session, candidates, lang, cfg); // одна повторная попытка
+  if (!result.length) { await busyBeat(bz, 'сборка миксов (ИИ), вторая попытка'); result = await composeMixes(env, session, candidates, lang, cfg); } // одна повторная попытка
   tm.compose = Date.now() - tc;
-  if (!result.length) { await progress.stop(false); return send(env, chat, t.failed, resultKeyboard(t)); }
+  if (!result.length) { await progress.stop(false); await busyClear(env, chat); return send(env, chat, t.failed, resultKeyboard(t)); }
 
   // Клиент просил безаромку — добавляем её в каждый микс сами (ИИ собирал миксы без неё).
   let lead = '';
@@ -1461,14 +1519,14 @@ async function makeMixes(env, chat, session, more = false, lang = 'ru', note = '
     result = r.mixes;
     if (!r.found && !session.naTold) { lead = t.noAromaNone; session.naTold = true; }
   }
-  return deliver(env, chat, session, result, { cfg, t, more, progress, booster: candidates.booster, lead, tm, t0 });
+  return deliver(env, chat, session, result, { cfg, t, more, progress, booster: candidates.booster, lead, tm, t0, bz });
 }
 
 /**
  * Отправить готовые миксы клиенту: картинка, текст, кнопки — и запомнить подбор в диалоге.
  * Общий хвост для обычного подбора и для доработки показанных миксов (безаромка).
  */
-async function deliver(env, chat, session, result, { cfg, t, more = false, progress, booster = null, lead = '', tm = {}, t0 = Date.now() }) {
+async function deliver(env, chat, session, result, { cfg, t, more = false, progress, booster = null, lead = '', tm = {}, t0 = Date.now(), bz = null }) {
   session.stage = 'done';
   session.used = [...(session.used || []), ...result.flatMap((m) => m.parts.map((p) => p.item.k))].slice(-80);
   session.titles = [...new Set([...(session.titles || []), ...result.map((m) => m.title)])].slice(-15);
@@ -1495,14 +1553,16 @@ async function deliver(env, chat, session, result, { cfg, t, more = false, progr
   if (cfg.settings.images && cfg.settings.image_first) {
     // Вместе: «загрузка» крутится, пока рисуется картинка, потом сразу картинка и следом текст с кнопками.
     // Двумя сообщениями, а не подписью к картинке: подпись узкая (по ширине картинки) — состав читать неудобно. Текст без картинки вперёд не уходит.
-    const photo = await coverImage(env, result, cfg);
+    const photo = await coverImage(env, result, cfg, (stage) => busyBeat(bz, stage));
     await progress.stop();
     if (photo) await sendPhoto(env, chat, photo, '');
     await sendMixes();
+    await busyClear(env, chat);
     tm.text = Date.now() - t0;
   } else {
     await progress.stop();
     await sendMixes();
+    await busyClear(env, chat); // миксы у клиента — дальше только картинка, ждать её страховке незачем
     tm.text = Date.now() - t0;
     if (cfg.settings.images) {
       await action(env, chat, 'upload_photo');
@@ -1649,12 +1709,13 @@ async function reworkNoAroma(env, chat, session, lang, remove, t0) {
   }
   session.prefs = { ...session.prefs, noaroma: !remove };
   const progress = await startProgress(env, chat, t.picking, t.progress, '');
-  await deliver(env, chat, session, result, { cfg, t, more: true, progress, tm: { parse: 0, compose: 0 }, t0 });
+  const bz = busyStart(env, chat, lang, session.text, progress.id);
+  await deliver(env, chat, session, result, { cfg, t, more: true, progress, tm: { parse: 0, compose: 0 }, t0, bz });
   return true;
 }
 
 /** Общая картинка: две попытки основной моделью, потом запасная. */
-async function coverImage(env, mixes, cfg) {
+async function coverImage(env, mixes, cfg, beat = null) {
   // Задание от ИИ берём, если оно полноценное; иначе — запасной шаблон.
   let own = String(mixes.image || '');
   const good = own.length > 200;
@@ -1667,7 +1728,7 @@ async function coverImage(env, mixes, cfg) {
   else if (!/sigma/i.test(own)) own += ' ' + IMAGE_TEMPLATE.logo + '.';
   const prompt = noLogo(good ? own + ' ' + (labels ? IMAGE_LABELS[cfg.settings.image_style] || IMAGE_LABELS['круги'] : IMAGE_SAFETY) : imagePrompt(mixes, !!logo));
   let lastErr = '', slow = false;
-  const attempt = (e2) => makeImage(e2, prompt).catch((e) => (console.log('image', e.message), lastErr = e.message, slow = !!e.slow, null));
+  const attempt = async (e2) => (beat && await beat('картинка'), makeImage(e2, prompt)).catch((e) => (console.log('image', e.message), lastErr = e.message, slow = !!e.slow, null));
   const t0 = Date.now();
   let photo = await attempt(env);
   // Вторая попытка — только если первая отказала быстро. Если основная модель молчала десятки секунд, ждать её ещё столько же
@@ -1682,6 +1743,7 @@ async function coverImage(env, mixes, cfg) {
     const fallback = env.IMAGE_PROVIDER === 'openai' ? '@cf/black-forest-labs/flux-2-klein-4b'
       : (env.IMAGE_MODEL || '').includes('flux-1') ? null : '@cf/black-forest-labs/flux-1-schnell';
     // Бесплатная модель с текстом не дружит — ей даём шаблон без выносок.
+    if (fallback && beat) await beat('картинка, запасная модель');
     if (fallback) photo = await makeImage({ ...env, IMAGE_PROVIDER: 'cloudflare', IMAGE_MODEL: fallback }, labels ? noLogo(imagePrompt(mixes, !!logo)) : prompt)
       .catch((e) => (console.log('image fallback', e.message), null));
   }
@@ -1983,20 +2045,36 @@ export function askedKeys(candidates, prefs, text = '') {
   const grams = [...w, ...w.map(bare).filter((x) => x.length >= 4), ...w.slice(0, -1).map((x, i) => x + ' ' + w[i + 1])];
   // Название должно быть в тексте ЦЕЛИКОМ. Одного общего слова мало: «потный вайб» — это не табак «Заельцовский вайб»,
   // а «с мятой» — не «Марокканская мята». Иначе бот ставит такой табак во все миксы или объявляет, что его нет в наличии.
-  const found = (name, gr) => {
+  // Слова сообщения раскладываем по длине: sameName совпадает только у названий, длина которых отличается не больше чем на 3 буквы,
+  // поэтому каждое название сравниваем лишь с такими словами. Результат тот же, а длинное сообщение больше не «вешает» бота.
+  const nearby = (gr) => {
+    const by = new Map();
+    for (const g of new Set(gr)) { const n = squash(g).length; if (n >= 3) (by.get(n) || by.set(n, []).get(n)).push(g); }
+    const seen = new Map(); // одно и то же слово («Mint», «Cookie») встречается в сотнях названий — считаем его один раз
+    return (name) => {
+      if (seen.has(name)) return seen.get(name);
+      const n = squash(name).length;
+      let ok = false;
+      for (let d = -3; n >= 3 && !ok && d <= 3; d++) { const list = by.get(n + d); if (list && list.some((g) => sameName(g, name))) ok = true; }
+      seen.set(name, ok);
+      return ok;
+    };
+  };
+  const found = (name, hit) => {
     if (!name) return false;
-    if (gr.some((g) => sameName(g, name))) return true;
+    if (hit(name)) return true;
     const nw = words(name).filter((x) => x.length >= 2);
-    return nw.length > 1 && nw.every((x) => gr.some((g) => sameName(g, x)));
+    return nw.length > 1 && nw.every((x) => hit(x));
   };
   // Слова сообщения, которые являются брендами: известные, наши (из справочника) и те, что разбор отметил как бренды.
   const brandNames = [...KNOWN_BRANDS, ...new Set(candidates.map((it) => it.b)), ...((prefs && prefs.brands) || []), ...((prefs && prefs.other_brands) || [])].filter(Boolean);
   const isBrand = (g) => brandNames.some((b) => sameName(g, b));
   const plainGrams = grams.filter((g) => !isBrand(g));
+  const inAll = nearby(grams), inPlain = nearby(plainGrams);
   const brandInText = (it) => !!it && words(it.b).some((bw) => bw.length >= 3 && grams.some((g) => sameName(g, bw)));
   // Название табака совпало только со словом-брендом («дарксайд») — засчитываем, лишь если назван и бренд этого табака.
-  const inText = (name, it) => found(name, plainGrams) || (found(name, grams) && brandInText(it));
-  const flavorOk = (f, it) => found(f, plainGrams) || (found(f, grams) && brandInText(it));
+  const inText = (name, it) => found(name, inPlain) || (found(name, inAll) && brandInText(it));
+  const flavorOk = (f, it) => found(f, inPlain) || (found(f, inAll) && brandInText(it));
   // «Малина», «мята», «печенье», «манго» — это вкусы, а не названия табаков, даже если у какого-то бренда табак так и называется
   // (Satyr «Raspberries» = «Малина»). Вкус узнаём по тегам справочника. Иначе бот объявляет «нет в наличии: Satyr Mint» на слово «мята».
   const tags = new Set(candidates.flatMap((it) => [...(it.t || []), ...(it.g || [])]).map((x) => squash(x)));
@@ -2950,11 +3028,13 @@ export const isStrongLine = (it, words = DEFAULTS.settings.strong_words) => {
 };
 
 /** Название к сравнению: латиницей, без пробелов, дефисов и регистра. «Крем-брюле» → «krembryule». */
-const squash = (s) => latin(norm(s)).toLowerCase().replace(/[^a-z0-9]/g, '');
+// Запоминаем результат: одно и то же название переводится в латиницу сотни раз за запрос, считаем его один раз.
+const memo = (fn) => { const m = new Map(); return (s) => { const k = String(s == null ? '' : s); let v = m.get(k); if (v === undefined) { if (m.size > 50000) m.clear(); v = fn(k); m.set(k, v); } return v; }; };
+const squash = memo((s) => latin(norm(s)).toLowerCase().replace(/[^a-z0-9]/g, ''));
 const words = (s) => latin(norm(s)).toLowerCase().split(/[^a-z0-9]+/).filter(Boolean);
 /** «Скелет» из согласных — гасит разницу транслита: «креме брюле» и «Creme Brulee» → «krmbrl». */
-const skel = (s) => squash(s).replace(/dzh/g, 'g').replace(/j/g, 'g').replace(/kh/g, 'h').replace(/ck/g, 'k').replace(/[cq]/g, 'k').replace(/ph/g, 'f')
-  .replace(/w/g, 'v').replace(/x/g, 'ks').replace(/[aeiouy]/g, '').replace(/(.)\1+/g, '$1');
+const skel = memo((s) => squash(s).replace(/dzh/g, 'g').replace(/j/g, 'g').replace(/kh/g, 'h').replace(/ck/g, 'k').replace(/[cq]/g, 'k').replace(/ph/g, 'f')
+  .replace(/w/g, 'v').replace(/x/g, 'ks').replace(/[aeiouy]/g, '').replace(/(.)\1+/g, '$1'));
 
 /** Похожи ли названия с учётом опечаток и транслита: «креме брюле» ≈ «Creme Brulee», «эпик минт» ≈ «Epic Mint». */
 /** То же название целиком (с опечатками и транслитом), без правила «одно слово из названия». */
@@ -2962,6 +3042,7 @@ export function sameName(a, b) {
   const x = squash(a), y = squash(b);
   if (x.length < 3 || y.length < 3) return false;
   if (x === y) return true;
+  if (Math.abs(x.length - y.length) > 3) return false; // ниже все совпадения — только для названий близкой длины
   // Сравнение «по согласным» ловит транслит («креме брюле» ≈ «Creme Brulee»), но только для названий близкой длины:
   // иначе «максимально» совпадает с «Маяки Сахалина» (mksmln ≈ mkshln).
   const sx = skel(a), sy = skel(b), dl = Math.abs(x.length - y.length);
