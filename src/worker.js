@@ -493,6 +493,8 @@ async function sheetScript(env, payload, fetcher = fetch) {
 }
 
 const STRENGTH_LOG = { light: 'Лёгко', medium: 'Средне', strong: 'Крепко', any: 'Без разницы' };
+// Для журнала: крепость и откуда она взялась — «Средне (кнопкой)», «Крепко (распознал ИИ)», «Лёгко (из памяти)».
+const strengthLog = (s, src) => (STRENGTH_LOG[s] || s || '—') + ' (' + src + ')';
 const STRENGTHS = ['light', 'medium', 'strong', 'any'];
 
 /** Память о крепости клиента: сколько часов — настройка strength_memory_hours (0 — не помнить). */
@@ -1122,6 +1124,7 @@ async function onText(env, msg, ctx) {
   // Новый запрос без крепости после таких уточнений — средняя по умолчанию: клиент уже не помнит, что там накрутил.
   // «Как ты любишь» — только то, что клиент сам назвал в новом запросе или выбрал кнопкой на вопрос «Как крепко?».
   let note = '';
+  let src = 'распознал ИИ'; // откуда крепость — для журнала
   let tuned = false; // крепость подбора меняли уточнениями
   const played = !force && !base && session && session.stage === 'done' && session.tuned;
   if (prefs.strength !== 'unknown') {
@@ -1130,27 +1133,31 @@ async function onText(env, msg, ctx) {
   } else if (base && base.prefs && STRENGTHS.includes(base.prefs.strength)) {
     prefs.strength = base.prefs.strength;
     tuned = !!base.tuned;
+    src = 'из прошлого запроса';
   } else if (played) {
     prefs.strength = 'medium';
     tuned = true; // и дальше, пока клиент сам не назовёт крепость, — средняя
     note = t.strengthDefault;
+    src = 'по умолчанию';
   } else if (!force) {
     const remembered = await recallStrength(env, chat);
     if (remembered) {
       prefs.strength = remembered; // уже выбирал недавно — не переспрашиваем
       note = t.strengthRemembered(t.strength[STRENGTHS.indexOf(remembered)]);
+      src = 'из памяти';
     } else {
       const asked = await send(env, chat, t.askStrength, strengthKeyboard(t));
       // Запоминаем номер вопроса, чтобы убрать его, когда клиент ответит.
       return putSession(env, chat, { stage: 'ask_strength', text: request, prefs, askId: (asked && asked.result && asked.result.message_id) || 0 });
     }
   }
-  if (prefs.strength === 'unknown') prefs.strength = 'any';
+  if (prefs.strength === 'unknown') { prefs.strength = 'any'; src = 'не сказал'; }
+  await logToSheet(env, ctx, { action: 'strength', userId: from.id || chat, strength: strengthLog(prefs.strength, src) });
   await makeMixes(env, chat, { text: request, prefs, ...carry, ...(tuned ? { tuned: true } : {}) }, false, lang, note, t0);
 }
 
 /** /config — коротко, что сейчас действует. */
-const CODE_VERSION = '12.55 · 66 (журнал: предложенные миксы и все нажатия кнопок)';
+const CODE_VERSION = '12.57 · 68 (журнал: откуда крепость · бесплатная картинка рисует ту же сцену, что платная)';
 export function configSummary(cfg, env = {}, stock = null) {
   const at = cfg._at ? new Date(cfg._at).toLocaleString('ru-RU', { timeZone: 'Europe/Moscow', day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) + ' МСК' : 'ещё не загружалась — работают значения из кода';
   const s = cfg.settings;
@@ -1237,7 +1244,7 @@ async function onCallback(env, cq, ctx) {
     // Вопрос с кнопками больше не нужен — убираем, чтобы в чате остались только запрос и миксы.
     if (cq.message.message_id) await tg(env, 'deleteMessage', { chat_id: chat, message_id: cq.message.message_id }).catch(() => {});
     await rememberStrength(env, chat, session.prefs.strength);
-    await logToSheet(env, ctx, { action: 'strength', userId: (cq.from && cq.from.id) || chat, strength: STRENGTH_LOG[session.prefs.strength] || session.prefs.strength });
+    await logToSheet(env, ctx, { action: 'strength', userId: who, strength: strengthLog(session.prefs.strength, 'кнопкой') });
     return makeMixes(env, chat, { text: session.text, prefs: session.prefs, used: [], titles: [] }, false, lang);
   }
   if (data.startsWith('adj:')) {
@@ -1259,7 +1266,7 @@ async function onCallback(env, cq, ctx) {
     // Это уточнение одного подбора, а не «как ты любишь»: запомненную крепость стираем, новый запрос начнётся со средней.
     session.tuned = true;
     await env.KV.delete('strength:' + chat).catch(() => {});
-    await logButton(up ? 'Покрепче' : 'Полегче', STRENGTH_LOG[session.prefs.strength] || session.prefs.strength);
+    await logButton(up ? 'Покрепче' : 'Полегче', strengthLog(session.prefs.strength, 'кнопкой'));
     return makeMixes(env, chat, session, false, lang);
   }
   if (data === 'more') {
@@ -1763,10 +1770,18 @@ async function coverImage(env, mixes, cfg, beat = null) {
     // Запасной вариант — бесплатно на Cloudflare: FLUX.2, если основная — OpenAI; иначе FLUX.1 (проще).
     const fallback = env.IMAGE_PROVIDER === 'openai' ? '@cf/black-forest-labs/flux-2-klein-4b'
       : (env.IMAGE_MODEL || '').includes('flux-1') ? null : '@cf/black-forest-labs/flux-1-schnell';
-    // Бесплатная модель с текстом не дружит — ей даём шаблон без выносок.
+    // Бесплатная модель с текстом не дружит, поэтому без подписей — но сцену рисует ту же, что и платная:
+    // описание от ИИ (ингредиенты, соусы, раскладка) и ту же композицию, только без фраз про подписи и надписи.
+    // Не приняла длинное задание — рисуем по короткому шаблону, как раньше: без картинки клиент не останется.
+    const free = { ...env, IMAGE_PROVIDER: 'cloudflare', IMAGE_MODEL: fallback };
+    const template = labels ? noLogo(imagePrompt(mixes, !!logo)) : prompt;
+    const scene = good && labels ? own.split(/(?<=[.!])\s+/)
+      .filter((x) => /sigma/i.test(x) || !/label|caption|text|letter|word|title|font|written|inscription|typograph|cyrillic|russian/i.test(x)).join(' ') : '';
+    const rich = scene.length > 200
+      ? noLogo(scene + ' ' + (IMAGE_LABELS[cfg.settings.image_style] || IMAGE_LABELS['круги']).replace(' ' + IMAGE_TEXT_RULES, '') + ' ' + IMAGE_SAFETY) : '';
     if (fallback && beat) await beat('картинка, запасная модель');
-    if (fallback) photo = await makeImage({ ...env, IMAGE_PROVIDER: 'cloudflare', IMAGE_MODEL: fallback }, labels ? noLogo(imagePrompt(mixes, !!logo)) : prompt)
-      .catch((e) => (console.log('image fallback', e.message), null));
+    if (fallback && rich) photo = await makeImage(free, rich).catch((e) => (console.log('image fallback scene', e.message), null));
+    if (fallback && !photo) photo = await makeImage(free, template).catch((e) => (console.log('image fallback', e.message), null));
   }
   if (photo && logo) {
     try {
