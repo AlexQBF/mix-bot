@@ -84,6 +84,10 @@ export const DEFAULT_TEXTS = {
     'Ответ после нажатия «Заказать»'],
   order_open: ['✍️ Написать менеджеру', '✍️ Գրել մենեջերին', 'Кнопка, которая открывает чат с менеджером'],
   order_btn: ['{name}', '{name}', 'Кнопка заказа под миксами; {name} — эмодзи микса'],
+  cart_btn: ['🛒 {name}', '🛒 {name}', 'Кнопка «в корзину на сайте» под миксами (второй ряд); {name} — эмодзи микса. Показывается, если задан shop_url'],
+  cart_hint: ['Верхний ряд — написать менеджеру, 🛒 — сразу в корзину на сайте.', 'Վերևի շարքը՝ գրել մենեջերին, 🛒՝ միանգամից զամբյուղ կայքում։',
+    'Строка под «Какой берём?», когда есть оба ряда кнопок: менеджеру и в корзину'],
+  cart_hint_only: ['🛒 — сразу в корзину на сайте.', '🛒՝ միանգամից զամբյուղ կայքում։', 'Та же строка, когда кнопок менеджеру нет (order_contact пустой)'],
   order_text: ['Здравствуйте! Хочу заказать табаки:', 'Բարև Ձեզ։ Ուզում եմ պատվիրել ծխախոտներ․', 'Первая строка готового сообщения менеджеру; под ней — список табаков'],
   order_tail: ['Подскажите, есть в наличии?', 'Կասե՞ք՝ առկա են։', 'Последняя строка готового сообщения менеджеру, после списка табаков'],
   order_text_mix: ['Здравствуйте! Хочу заказать табаки для микса «{name}».', 'Բարև Ձեզ։ Ուզում եմ պատվիրել ծխախոտներ «{name}» միքսի համար։', 'Запасной текст сообщения менеджеру, если список табаков не поместился в ссылку; {name} — название микса'],
@@ -134,6 +138,8 @@ const MAIN_TEXT_KEYS = ['hello', 'choose_lang', 'lang_set', 'picking', 'progress
   'strength_label', 'bowl_note', 'footer', 'btn_more', 'btn_new', 'description', 'about'];
 
 // Настройки: то, что код гарантирует сам, независимо от ИИ. Видно и меняется в таблице.
+// Адрес сайта магазина, если в таблице настройка shop_url пустая. Старый сайт на Тильде (vektorsigma.am) больше не используется.
+const SHOP_DEFAULT = 'https://alexqbf.github.io/sigma-shop/';
 export const DEFAULT_SETTINGS = [
   { key: 'text_ai', def: 'chatgpt', type: 'choice',
     options: { chatgpt: ['chatgpt', 'gpt', 'openai', 'чатгпт', 'чат гпт', 'чат-гпт'], claude: ['claude', 'клод', 'anthropic'], 'бесплатно': ['бесплатно', 'бесплатные', 'free', 'cloudflare', 'llama'] },
@@ -177,7 +183,8 @@ export const DEFAULT_SETTINGS = [
   { key: 'image_first', def: 'да', type: 'yesno',
     desc: '«да» — картинка и текст приходят вместе, пока готовятся — бот показывает «загрузку» со сменой фраз. «нет» — сначала текст, картинка следом (быстрее).' },
   { key: 'order_contact', def: 'yurybadalian', type: 'text', desc: 'Кому в Telegram уходит заказ: имя пользователя без @. Под миксами появляются кнопки «Заказать» с готовым текстом заказа. Пусто — кнопок нет, под миксами ссылка на магазин.' },
-  { key: 'shop_url', def: 'https://vektorsigma.am', type: 'text', desc: 'Ссылка на магазин под миксами. Пусто — без ссылки.' },
+  { key: 'shop_url', def: SHOP_DEFAULT, type: 'text', desc: 'Адрес сайта магазина. На него ведут ссылки на табаки в миксах ' +
+    '(<адрес>#v-<номер товара>, самая маленькая пачка из наличия), кнопки «🛒 в корзину на сайте» и ссылка на магазин под миксами. Пусто — адрес по умолчанию из кода.' },
   { key: 'admins', def: '', type: 'ids', desc: 'Telegram ID админов через запятую: могут /reload и /config и получают уведомления. Свой ID — команда /id у бота.' },
 ];
 
@@ -635,7 +642,7 @@ export function tx(cfg, lang = 'ru') {
     tooFew: g('too_few'), failed: g('failed'), stuck: g('stuck'), more: g('btn_more'), newReq: g('btn_new'), stronger: g('btn_stronger'), lighter: g('btn_lighter'),
     strengthLabel: g('strength_label'), strengthWord: g('strength_word'),
     strengthNames: ['', g('strength_1'), g('strength_2'), g('strength_3'), g('strength_4'), g('strength_5')],
-    gram: g('gram'), packNote: (w) => fill(g('pack_note'), { g: w }), packOne: (w) => fill(g('pack_one'), { g: w }), packShort: (w) => fill(g('pack_short'), { g: w }), packShortFrom: (w) => fill(g('pack_short_from'), { g: w }), packShortOnly: (w) => fill(g('pack_short_only'), { g: w }), orderHint: g('order_hint'), orderReady: (name) => fill(g('order_ready'), { name }), orderOpen: g('order_open'), noSwear: g('no_swear'), orderBtn: (name) => fill(g('order_btn'), { name }), orderText: g('order_text'), orderTail: g('order_tail'), orderTextMix: (name) => fill(g('order_text_mix'), { name }), packMany: (w) => fill(g('pack_many'), { g: w }), bowlNote: (gr) => fill(g('bowl_note'), { g: gr }), footer: g('footer'),
+    gram: g('gram'), packNote: (w) => fill(g('pack_note'), { g: w }), packOne: (w) => fill(g('pack_one'), { g: w }), packShort: (w) => fill(g('pack_short'), { g: w }), packShortFrom: (w) => fill(g('pack_short_from'), { g: w }), packShortOnly: (w) => fill(g('pack_short_only'), { g: w }), orderHint: g('order_hint'), orderReady: (name) => fill(g('order_ready'), { name }), orderOpen: g('order_open'), noSwear: g('no_swear'), orderBtn: (name) => fill(g('order_btn'), { name }), cartBtn: (name) => fill(g('cart_btn'), { name }), cartHint: g('cart_hint'), cartHintOnly: g('cart_hint_only'), orderText: g('order_text'), orderTail: g('order_tail'), orderTextMix: (name) => fill(g('order_text_mix'), { name }), packMany: (w) => fill(g('pack_many'), { g: w }), bowlNote: (gr) => fill(g('bowl_note'), { g: gr }), footer: g('footer'),
     llmLang: lang === 'hy' ? 'армянском (восточноармянский литературный, армянским алфавитом)' : 'русском',
   };
 }
@@ -1265,7 +1272,7 @@ async function onText(env, msg, ctx, via = '') {
 }
 
 /** /config — коротко, что сейчас действует. */
-const CODE_VERSION = '12.63 · 74 (журнал: у предложенных миксов — состав, доли и пачки)';
+const CODE_VERSION = '12.67 · 78 (только новый сайт: shop_url, ссылки на табаки и кнопки «🛒 в корзину»)';
 export function configSummary(cfg, env = {}, stock = null) {
   const at = cfg._at ? new Date(cfg._at).toLocaleString('ru-RU', { timeZone: 'Europe/Moscow', day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) + ' МСК' : 'ещё не загружалась — работают значения из кода';
   const s = cfg.settings;
@@ -1290,6 +1297,8 @@ export function configSummary(cfg, env = {}, stock = null) {
     `Стиль картинки: ${esc(s.image_style)} (${mixInstruction(cfg.instruction, s.image_style).fromTable ? 'раздел из таблицы' : 'текст из кода'})\n` +
     stockLine(stock ? { state: 'ok', ...stockStats(stock) } : null) + '\n' +
     `Крепкое только по запросу: ${yn(s.strong_only_on_request)} · только из наличия: ${yn(s.only_in_stock)} · беречь корзину (маленькие пачки): ${yn(s.prefer_small_packs)} · картинки: ${yn(s.images)} · короткие строки состава: ${yn(s.short_lines)} · рейтинг у табаков: ${yn(s.show_rating)}${s.show_rating ? ` (ссылка: ${esc(s.rating_link)})` : ''}\n` +
+    `Сайт магазина: ${esc(newShopBase(s))}` + (String(s.shop_url || '').trim() && newShopBase(s) !== String(s.shop_url).trim().replace(/\/+$/, '') + '/'
+      ? ' (в shop_url адрес записан с ошибкой — нужен вид https://…; взят адрес по умолчанию)' : '') + '\n' +
     `Админов: ${s.admins.length + String(env.ADMIN_IDS || '').split(',').filter((x) => x.trim()).length}\n\n` +
     'Изменения в таблице подтягиваются сами раз в 15 минут, или сразу — командой /reload.';
 }
@@ -1334,10 +1343,10 @@ async function onCallback(env, cq, ctx) {
     const cfg = await loadConfig(env);
     const saved = session && Array.isArray(session.orders) ? session.orders[i] : null; // запасной путь: подбор из текущего диалога
     const o = mix ? { title: mix.title, url: orderLink(mix, t, cfg.settings.order_contact) } : saved;
-    if (!o || !o.url) return send(env, chat, t.footer + (cfg.settings.shop_url ? ' ' + cfg.settings.shop_url : ''));
+    if (!o || !o.url) return send(env, chat, t.footer + ' ' + newShopBase(cfg.settings));
     await logToSheet(env, ctx, { action: 'order', userId: who, mix: o.title });
     const j = await send(env, chat, esc(t.orderReady(o.title)), { inline_keyboard: [[{ text: t.orderOpen, url: o.url }]] });
-    if (j && j.ok === false) await send(env, chat, t.footer + (cfg.settings.shop_url ? ' ' + cfg.settings.shop_url : ''));
+    if (j && j.ok === false) await send(env, chat, t.footer + ' ' + newShopBase(cfg.settings));
     return;
   }
   // «Ещё варианты» — те же вкусы и та же крепость, что в подборе, под которым нажали: пишем её вместе с кнопкой.
@@ -1470,7 +1479,7 @@ export function strengthSteps(requested, mixes = []) {
  * Кнопки под подбором: миксы (нажатие сразу открывает чат с менеджером, текст заказа уже вписан),
  * быстрые уточнения «Покрепче» / «Полегче» / «Ещё» и «Новый запрос». steps — куда ведут кнопки крепости (strengthSteps).
  */
-function resultKeyboard(t, orders = [], steps = {}) {
+function resultKeyboard(t, orders = [], steps = {}, carts = []) {
   const quick = [
     ...(steps.up ? [{ text: t.stronger, callback_data: 'adj:+' + steps.up }] : []),
     ...(steps.down ? [{ text: t.lighter, callback_data: 'adj:-' + steps.down }] : []),
@@ -1478,9 +1487,26 @@ function resultKeyboard(t, orders = [], steps = {}) {
   ];
   return { inline_keyboard: [
     ...(orders.length ? [orders.map((o) => ({ text: o.text, url: o.url }))] : []),
+    ...(carts.length ? [carts.map((o) => ({ text: o.text, url: o.url }))] : []),
     quick,
     [{ text: t.newReq, callback_data: 'new' }],
   ] };
+}
+
+/**
+ * Кнопки «🛒 В корзину на сайте»: ссылка открывает новый сайт магазина и сразу кладёт микс в корзину.
+ * Формат (заметка проекта site-ssylki-dlya-bota.md): <адрес>#mix?i=<Tilda UID пачки>:<доля %>,…&n=<название микса>.
+ * Пачки — те же, что в составе микса (самая маленькая из наличия). Если хотя бы у одного табака номера товара нет —
+ * кнопки у этого микса нет: неполную корзину не собираем. base — адрес сайта (newShopBase, настройка shop_url); пусто — кнопок нет.
+ */
+export function cartButtons(mixes, t, base) {
+  if (!base) return [];
+  return mixes.map((m, i) => {
+    const ids = m.parts.map((p) => tildaUid(p.item && p.item.u));
+    if (!ids.length || ids.length > 8 || ids.some((x) => !x)) return null;
+    const url = `${base}#mix?i=` + m.parts.map((p, k) => `${ids[k]}:${Math.round(p.p)}`).join(',') + '&n=' + encodeURIComponent(String(m.title).slice(0, 60));
+    return { text: t.cartBtn(m.emoji || String(i + 1)).slice(0, 60), url, title: m.title };
+  }).filter(Boolean);
 }
 
 /**
@@ -1680,21 +1706,22 @@ async function deliver(env, chat, session, result, { cfg, t, more = false, progr
   session.last = packMixes(result); // состав показанных миксов: по нему дорабатываем их без ИИ
   // Кнопки миксов — прямые ссылки в чат с менеджером (заказ в одно касание), в диалоге их хранить не нужно.
   const orders = orderButtons(result, t, cfg.settings.order_contact);
+  const carts = cartButtons(result, t, newShopBase(cfg.settings));
   delete session.orders;
   // «Сейчас нет в наличии…» говорим один раз: по кнопкам «Покрепче» / «Полегче» / «Ещё» не повторяем.
   const tellGone = !more && !session.goneTold && (session.missing || []).length > 0;
   session.goneTold = true;
   await putSession(env, chat, session);
 
-  const shop = cfg.settings.shop_url;
+  const shop = newShopBase(cfg.settings);
   // Одной строкой перед миксами: чего нет в наличии. Дальше миксы как обычно, без оговорок в описаниях.
   const gone = (tellGone ? esc(t.outOfStock(session.missing.map((m) => m.name).join(', '))) + '\n\n' : '') + (lead ? esc(lead) + '\n\n' : '');
   const bst = booster;
   const tip = result.some((m) => m.softer)
     ? '\n\n' + esc(t.strengthTip(bst ? `${bst.b}${bst.l && bst.l !== 'Основная' ? ' ' + bst.l : ''} ${bst.n}` : '')) : '';
-  const text = gone + result.map((m, i) => renderMix(m, i, t, { rating: cfg.settings.show_rating, ratingLink: cfg.settings.rating_link, short: cfg.settings.short_lines, keepLine: sameNameKeys(result) })).join('\n\n') + tip +
-    '\n\n' + (orders.length ? t.orderHint : t.footer + (shop ? ' ' + shop : ''));
-  const kb = resultKeyboard(t, orders, strengthSteps(session.prefs.strength, result));
+  const text = gone + result.map((m, i) => renderMix(m, i, t, { rating: cfg.settings.show_rating, ratingLink: cfg.settings.rating_link, shopBase: newShopBase(cfg.settings), short: cfg.settings.short_lines, keepLine: sameNameKeys(result) })).join('\n\n') + tip +
+    '\n\n' + (orders.length || carts.length ? t.orderHint + (carts.length ? '\n' + esc(orders.length ? t.cartHint : t.cartHintOnly) : '') : t.footer + (shop ? ' ' + shop : ''));
+  const kb = resultKeyboard(t, orders, strengthSteps(session.prefs.strength, result), carts);
   // Журнал: названия показанных миксов — в строку запроса (или нажатой кнопки), на который бот ответил.
   let logged = null;
   const sendMixes = async () => {
@@ -2377,10 +2404,36 @@ export function sameNameKeys(mixes) {
  * «сайт» — карточка товара в магазине (it.u, из вкладки «Сайт»), «htreviews» — страница табака там, «нет» — без ссылки.
  * Нет оценок или вкуса нет на htreviews (своя карточка) — рейтинга нет. Неразрывный пробел держит рейтинг рядом с фасовкой.
  */
-export function ratingLink(it, mode = 'htreviews') {
+/** Адрес сайта магазина из настройки shop_url — всегда со слэшем на конце. Не задан или записан с ошибкой — адрес по умолчанию (SHOP_DEFAULT). */
+export function newShopBase(settings) {
+  const s = String((settings && settings.shop_url) || '').trim();
+  return (/^https:\/\/[^\s"<>#?]+$/.test(s) ? s : SHOP_DEFAULT).replace(/\/+$/, '') + '/';
+}
+
+/** Номер товара (Tilda UID) из старой ссылки на карточку: …/tproduct/<номер блока>-<UID>-название → UID. '' — номера нет, не выдумываем. */
+export function tildaUid(url) {
+  const m = String(url || '').match(/\/tproduct\/([^/?#]+)/);
+  if (!m) return '';
+  // В начале адреса карточки идут числа через дефис; номер товара — самое длинное из них (у Тильды он 12-значный).
+  const nums = [];
+  for (const part of m[1].split('-')) { if (/^\d+$/.test(part)) nums.push(part); else break; }
+  const uid = nums.sort((a, b) => b.length - a.length)[0] || '';
+  return uid.length >= 10 ? uid : '';
+}
+
+/**
+ * Ссылка на карточку табака на сайте магазина: <адрес>#v-<UID>. Номер товара берём из адреса карточки в выгрузке Тильды (вкладка «Сайт»).
+ * Адрес сайта не задан или номера нет — ссылки нет ('') : на старый сайт не ведём, номер не выдумываем.
+ */
+export function shopCard(oldUrl, base = '') {
+  const uid = base ? tildaUid(oldUrl) : '';
+  return uid ? `${base}#v-${uid}` : '';
+}
+
+export function ratingLink(it, mode = 'htreviews', shopBase = '') {
   if (!it || it.o || !(it.r > 0) || !(it.c > 0)) return '';
   const star = `${Number(it.r).toFixed(1)}★`;
-  const url = mode === 'сайт' ? (/^https:\/\/[^\s"<>]+$/.test(String(it.u || '')) ? it.u : '')
+  const url = mode === 'сайт' ? shopCard(it.u, shopBase)
     : mode === 'htreviews' && /^[a-z0-9\-_.\/%]+$/i.test(String(it.k || '')) ? `${SOURCE}/tobaccos/${it.k}` : '';
   return `\u00A0(${url ? `<a href="${esc(url).replace(/"/g, '%22')}">${star}</a>` : star})`;
 }
@@ -2408,7 +2461,7 @@ export function renderMix(m, i, t = 'ru', opts = {}) {
       ? (w[0] <= PACK_SMALL ? t.packShort(w[0]) : w.length > 1 ? t.packShortFrom(w[0]) : t.packShortOnly(w[0]))
       : (w.length > 1 ? t.packMany(w.join(' / ')) : w[0] > 40 ? t.packNote(w[0]) : t.packOne(w[0]));
     const pack = packText ? ` · <i>${esc(packText)}</i>` : '';
-    return `${p.p}%\u2002<b>${esc(it.n)}</b> · ${esc(it.b + line)}${pack}${opts.rating ? ratingLink(it, opts.ratingLink) : ''}`;
+    return `${p.p}%\u2002<b>${esc(it.n)}</b> · ${esc(it.b + line)}${pack}${opts.rating ? ratingLink(it, opts.ratingLink, opts.shopBase) : ''}`;
   });
   // Крепость — пятью точками в строке названия: ●●○○○. Если числа нет (старые данные) — словами отдельной строкой.
   const n = typeof m.strength === 'number' && m.strength >= 1 && m.strength <= 5 ? m.strength : 0;
