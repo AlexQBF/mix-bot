@@ -1265,7 +1265,7 @@ async function onText(env, msg, ctx, via = '') {
 }
 
 /** /config — коротко, что сейчас действует. */
-const CODE_VERSION = '12.62 · 73 (мат: и в тексте, и в голосовом — «давай без мата» · журнал: пометки «мат» и «не по теме»)';
+const CODE_VERSION = '12.63 · 74 (журнал: у предложенных миксов — состав, доли и пачки)';
 export function configSummary(cfg, env = {}, stock = null) {
   const at = cfg._at ? new Date(cfg._at).toLocaleString('ru-RU', { timeZone: 'Europe/Moscow', day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) + ' МСК' : 'ещё не загружалась — работают значения из кода';
   const s = cfg.settings;
@@ -1659,6 +1659,20 @@ async function makeMixes(env, chat, session, more = false, lang = 'ru', note = '
  * Отправить готовые миксы клиенту: картинка, текст, кнопки — и запомнить подбор в диалоге.
  * Общий хвост для обычного подбора и для доработки показанных миксов (безаромка).
  */
+/**
+ * Микс для журнала: «Лесной поцелуй {50% Skazka · Satyr, 25 г; 30% Raspberry · Kraken, 30 г}».
+ * Доля, табак, бренд (с линейкой, если она не основная) и самая маленькая пачка из наличия — та же, что уходит в заказ менеджеру.
+ */
+export function mixForLog(m) {
+  const parts = m.parts.map((p) => {
+    const it = p.item || {};
+    const w = Array.isArray(it.w) && it.w.length ? Math.min(...it.w) : 0;
+    const ln = it.l && it.l !== 'Основная' ? ' ' + it.l : '';
+    return `${p.p}% ${it.n} · ${it.b}${ln}` + (w ? `, ${w} г` : '');
+  });
+  return `${m.title} {${parts.join('; ')}}`;
+}
+
 async function deliver(env, chat, session, result, { cfg, t, more = false, progress, booster = null, lead = '', tm = {}, t0 = Date.now(), bz = null }) {
   session.stage = 'done';
   session.used = [...(session.used || []), ...result.flatMap((m) => m.parts.map((p) => p.item.k))].slice(-80);
@@ -1685,7 +1699,7 @@ async function deliver(env, chat, session, result, { cfg, t, more = false, progr
   let logged = null;
   const sendMixes = async () => {
     const j = await send(env, chat, text, kb);
-    logged = logToSheet(env, null, { action: 'mixes', userId: chat, mixes: result.map((m) => m.title) });
+    logged = logToSheet(env, null, { action: 'mixes', userId: chat, mixes: result.map(mixForLog) });
     return j;
   };
   const ti = Date.now();
