@@ -1157,7 +1157,7 @@ async function onText(env, msg, ctx) {
 }
 
 /** /config — коротко, что сейчас действует. */
-const CODE_VERSION = '12.57 · 68 (журнал: откуда крепость · бесплатная картинка рисует ту же сцену, что платная)';
+const CODE_VERSION = '12.58 · 69 (бесплатная картинка — снова по короткому шаблону, без текста)';
 export function configSummary(cfg, env = {}, stock = null) {
   const at = cfg._at ? new Date(cfg._at).toLocaleString('ru-RU', { timeZone: 'Europe/Moscow', day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) + ' МСК' : 'ещё не загружалась — работают значения из кода';
   const s = cfg.settings;
@@ -1770,18 +1770,11 @@ async function coverImage(env, mixes, cfg, beat = null) {
     // Запасной вариант — бесплатно на Cloudflare: FLUX.2, если основная — OpenAI; иначе FLUX.1 (проще).
     const fallback = env.IMAGE_PROVIDER === 'openai' ? '@cf/black-forest-labs/flux-2-klein-4b'
       : (env.IMAGE_MODEL || '').includes('flux-1') ? null : '@cf/black-forest-labs/flux-1-schnell';
-    // Бесплатная модель с текстом не дружит, поэтому без подписей — но сцену рисует ту же, что и платная:
-    // описание от ИИ (ингредиенты, соусы, раскладка) и ту же композицию, только без фраз про подписи и надписи.
-    // Не приняла длинное задание — рисуем по короткому шаблону, как раньше: без картинки клиент не останется.
-    const free = { ...env, IMAGE_PROVIDER: 'cloudflare', IMAGE_MODEL: fallback };
-    const template = labels ? noLogo(imagePrompt(mixes, !!logo)) : prompt;
-    const scene = good && labels ? own.split(/(?<=[.!])\s+/)
-      .filter((x) => /sigma/i.test(x) || !/label|caption|text|letter|word|title|font|written|inscription|typograph|cyrillic|russian/i.test(x)).join(' ') : '';
-    const rich = scene.length > 200
-      ? noLogo(scene + ' ' + (IMAGE_LABELS[cfg.settings.image_style] || IMAGE_LABELS['круги']).replace(' ' + IMAGE_TEXT_RULES, '') + ' ' + IMAGE_SAFETY) : '';
+    // Бесплатная модель с текстом не дружит — ей только короткий шаблон без подписей: цвета и текстуры соусов и гарнир.
+    // (В 12.57 пробовали давать ей полное описание сцены от ИИ — она начала рисовать надписи и кривые «кольца»; вернули шаблон.)
     if (fallback && beat) await beat('картинка, запасная модель');
-    if (fallback && rich) photo = await makeImage(free, rich).catch((e) => (console.log('image fallback scene', e.message), null));
-    if (fallback && !photo) photo = await makeImage(free, template).catch((e) => (console.log('image fallback', e.message), null));
+    if (fallback) photo = await makeImage({ ...env, IMAGE_PROVIDER: 'cloudflare', IMAGE_MODEL: fallback }, labels ? noLogo(imagePrompt(mixes, !!logo)) : prompt)
+      .catch((e) => (console.log('image fallback', e.message), null));
   }
   if (photo && logo) {
     try {
