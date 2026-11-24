@@ -101,6 +101,15 @@ export const DEFAULT_TEXTS = {
   btn_new: ['✏️ Новый запрос', '✏️ Նոր հարցում', 'Кнопка под миксами'],
   not_relevant: ['Я подбираю кальянные миксы. Напиши, какие вкусы и табаки тебе нравятся и как крепко куришь.',
     'Ես կալյանի միքսեր եմ ընտրում։ Գրիր, թե որ համերն ու ծխախոտներն են քեզ դուր գալիս և որքան թունդ ես ծխում։', 'Если написали не про кальян'],
+  voice_long: ['Голосовое длинновато 🙂 Запиши покороче, до {n} секунд: какие вкусы хочется и как крепко куришь. Или напиши текстом.',
+    'Ձայնային հաղորդագրությունը երկար է 🙂 Ձայնագրիր ավելի կարճ՝ մինչև {n} վայրկյան. ինչ համեր ես ուզում և որքան թունդ ես ծխում։ Կամ գրիր տեքստով։',
+    'Голосовое длиннее, чем разрешено в настройках (voice_max_sec)'],
+  voice_fail: ['Не получилось разобрать голосовое. Попробуй ещё раз или напиши текстом, какие вкусы хочется.',
+    'Չստացվեց հասկանալ ձայնային հաղորդագրությունը։ Փորձիր նորից կամ գրիր տեքստով, թե ինչ համեր ես ուզում։',
+    'Голосовое не расшифровалось или в нём нет слов'],
+  text_long: ['Очень длинное сообщение 🙂 Напиши покороче, до {n} знаков: какие вкусы хочется, чего не надо и как крепко куришь.',
+    'Շատ երկար հաղորդագրություն է 🙂 Գրիր ավելի կարճ՝ մինչև {n} նիշ. ինչ համեր ես ուզում, ինչ չես ուզում և որքան թունդ ես ծխում։',
+    'Текст длиннее, чем разрешено в настройках (text_max_chars)'],
   not_text: ['Напиши текстом, что любишь курить, — подберу миксы.', 'Տեքստով գրիր, թե ինչ ես սիրում ծխել, և ես միքսեր կընտրեմ։', 'Если прислали фото, голосовое и т.п.'],
   too_few: ['Под такой запрос у нас почти ничего нет. Попробуй описать пошире или убрать ограничения.',
     'Այս հարցման համար մեզ մոտ գրեթե ոչինչ չկա։ Փորձիր ավելի լայն նկարագրել կամ հանել սահմանափակումները։', 'Если подходящих табаков почти нет'],
@@ -144,6 +153,11 @@ export const DEFAULT_SETTINGS = [
   { key: 'logo_overlay', def: 'да', type: 'yesno', desc: 'Накладывать на картинку готовый логотип (файл src/logo.png) вместо надписи, которую рисует модель (да / нет).' },
   { key: 'block_swear', def: 'да', type: 'yesno', desc: 'Не обрабатывать сообщения с матом: бот просит написать без ругани (да / нет).' },
   { key: 'badge_overlay', def: 'да', type: 'yesno', desc: 'Добавлять на картинку значок магазина в левый верхний угол (файл src/badge.png) (да / нет). Работает вместе с logo_overlay.' },
+  { key: 'voice', def: 'да', type: 'yesno', desc: 'Принимать голосовые сообщения: бот расшифровывает их (бесплатный Whisper на Cloudflare) и подбирает миксы, как по тексту (да / нет).' },
+  { key: 'voice_max_sec', def: '60', type: 'int', min: 10, max: 180,
+    desc: 'Самое длинное голосовое, которое бот расшифровывает, секунд. Длиннее — просит записать покороче, ИИ не тратится.' },
+  { key: 'text_max_chars', def: '1000', type: 'int', min: 200, max: 4000,
+    desc: 'Самое длинное текстовое сообщение, которое бот разбирает, знаков. Длиннее — просит написать покороче, ИИ не тратится.' },
   { key: 'strength_memory_hours', def: '3', type: 'int', min: 0, max: 72,
     desc: 'Сколько часов бот помнит выбранную клиентом крепость и не переспрашивает в следующих запросах. 0 — спрашивать каждый раз.' },
   { key: 'noaroma_share', def: '20', type: 'int', min: 5, max: 50,
@@ -614,6 +628,7 @@ export function tx(cfg, lang = 'ru') {
     tellFirst: g('tell_first'), noCatalog: g('no_catalog'), picking: g('picking'), pickingMore: g('picking_more'),
     progress: g('progress').split('|').map((x) => x.trim()).filter(Boolean),
     strengthRemembered: (s) => fill(g('strength_remembered'), { s }),
+    voiceLong: (n) => fill(g('voice_long'), { n }), voiceFail: g('voice_fail'), textLong: (n) => fill(g('text_long'), { n }),
     strengthDefault: g('strength_default'),
     outOfStock: (name) => fill(g('out_of_stock'), { name }), noAromaNone: g('noaroma_none'), noAromaAlready: g('noaroma_already'), noAromaAbsent: g('noaroma_absent'),
     strengthTip: (base) => (base ? fill(g('strength_tip'), { base }) : g('strength_tip_nobase')),
@@ -898,6 +913,7 @@ async function onWebhook(request, env, ctx) {
     try {
       if (update.callback_query) await onCallback(env, update.callback_query, ctx);
       else if (update.message && update.message.text) await onText(env, update.message, ctx);
+      else if (update.message && update.message.voice) await onVoice(env, update.message, ctx);
       else if (update.message) await send(env, update.message.chat.id, (await txt(env, await getLang(env, update.message.chat.id))).notText);
     } catch (e) {
       console.log('handler', e && e.stack || e);
@@ -941,7 +957,78 @@ function langKeyboard() {
 
 /* ───────────────────────── Диалог ───────────────────────── */
 
-async function onText(env, msg, ctx) {
+/* ───── Голосовые сообщения ─────
+ * Голосовое расшифровывает бесплатный Whisper на Cloudflare, дальше текст идёт обычным путём (onText): тот же разбор,
+ * та же проверка «по теме ли», те же миксы. Защита от лишних трат:
+ *   — длиннее voice_max_sec (или тяжелее 2 МБ) — не скачиваем и не расшифровываем, просим записать покороче;
+ *   — в расшифровке нет слов — просим повторить или написать текстом, до платного ИИ дело не доходит;
+ *   — болтовня не по теме — её отсеивает обычный разбор запроса (ответ «Я подбираю кальянные миксы…»).
+ * В журнал идёт расшифровка, а после разбора её заменяет короткая выжимка от ИИ (полный текст — в примечании к ячейке).
+ */
+const WHISPER = '@cf/openai/whisper-large-v3-turbo';
+// Подсказка Whisper: о чём речь и как пишутся названия — так он реже коверкает вкусы и бренды.
+const WHISPER_HINT = 'Кальян, табак, миксы. Вкусы: манго, маракуйя, мята, холодок, цитрус, ягоды. Бренды: Deus, Kraken, Satyr, Spectrum, Хулиган, Morpheus, Original Virginia.';
+const hasWords = (x) => /[а-яёա-ֆ]{2}/i.test(x);
+
+function bytesToB64(bytes) {
+  let bin = '';
+  for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
+  return btoa(bin);
+}
+
+/** Расшифровка голосового. Возвращает текст ('' — слов нет); при сбое бросает ошибку. */
+export async function transcribe(env, fileId, lang = 'ru') {
+  const f = await tg(env, 'getFile', { file_id: fileId });
+  const path = f && f.result && f.result.file_path;
+  if (!path) throw new Error('Telegram не отдал файл голосового');
+  const r = await fetch(`https://api.telegram.org/file/bot${env.BOT_TOKEN}/${path}`);
+  if (!r.ok) throw new Error('голосовое не скачалось, код ' + r.status);
+  const audio = bytesToB64(new Uint8Array(await r.arrayBuffer()));
+  const run = async (extra) => {
+    const o = await env.AI.run(WHISPER, { audio, task: 'transcribe', initial_prompt: WHISPER_HINT, ...extra });
+    return String((o && o.text) || '').replace(/\s+/g, ' ').trim();
+  };
+  // Язык Whisper определяет сам (клиент может говорить по-русски или по-армянски).
+  // Если в ответе нет ни русских, ни армянских слов — пробуем ещё раз, уже с языком этого чата.
+  let text = await run({});
+  if (!hasWords(text)) { const again = await run({ language: lang }); if (hasWords(again)) text = again; }
+  // Тишина: Whisper иногда «расшифровывает» её собственной подсказкой или титрами — такое за слова не считаем.
+  if (!hasWords(text) || text.includes(WHISPER_HINT.slice(0, 20)) || /^(продолжение следует|субтитры|редактор субтитров)/i.test(text)) return '';
+  return text;
+}
+
+async function onVoice(env, msg, ctx) {
+  const chat = msg.chat.id;
+  const lang = await getLang(env, chat);
+  const t = await txt(env, lang);
+  const st = (await loadConfig(env)).settings;
+  if (!st.voice || !env.AI) return send(env, chat, t.notText);
+  const from = msg.from || {};
+  const sec = Math.round(msg.voice.duration || 0);
+  const via = 'аудио, ' + sec + ' с';
+  const log = (text) => logToSheet(env, ctx, { action: 'message', ts: (msg.date ? msg.date * 1000 : Date.now()), userId: from.id || chat,
+    username: from.username || '', name: [from.first_name, from.last_name].filter(Boolean).join(' '), text, input: via });
+  if (sec > st.voice_max_sec || (msg.voice.file_size || 0) > 2 * 1024 * 1024) {
+    await log('🎤 (слишком длинное — не расшифровывал)');
+    return send(env, chat, esc(t.voiceLong(st.voice_max_sec)));
+  }
+  await action(env, chat, 'typing');
+  let text = '';
+  try {
+    text = await transcribe(env, msg.voice.file_id, lang);
+  } catch (e) {
+    console.log('voice', e.message);
+    await reportProblem(env, 'voice', '⚠️ Не получилось расшифровать голосовое (Whisper на Cloudflare): ' + e.message + '\nКлиента попросил повторить или написать текстом.');
+    await log('🎤 (не расшифровалось)');
+    return send(env, chat, t.voiceFail);
+  }
+  if (!text) { await log('🎤 (без слов)'); return send(env, chat, t.voiceFail); }
+  // Косая черта в начале расшифровки не должна превратиться в команду бота.
+  text = text.replace(/^[\/\s]+/, '').slice(0, st.text_max_chars);
+  return onText(env, { ...msg, text }, ctx, via);
+}
+
+async function onText(env, msg, ctx, via = '') {
   const chat = msg.chat.id;
   const text = msg.text.trim();
   const cmd = text.split(/[\s@]/)[0].toLowerCase();
@@ -1037,10 +1124,15 @@ async function onText(env, msg, ctx) {
 
   // Журнал: кто, когда и что написал.
   const from = msg.from || {};
+  // Слишком длинный текст не разбираем: просим написать короче, ИИ не тратится. (Голосовые ограничены по секундам — см. onVoice.)
+  const maxLen = (await loadConfig(env)).settings.text_max_chars;
+  const tooLong = !cmd.startsWith('/') && !via && text.length > maxLen;
   if (!cmd.startsWith('/')) {
     await logToSheet(env, ctx, { action: 'message', ts: (msg.date ? msg.date * 1000 : Date.now()), userId: from.id || chat,
-      username: from.username || '', name: [from.first_name, from.last_name].filter(Boolean).join(' '), text: text.slice(0, 2000) });
+      username: from.username || '', name: [from.first_name, from.last_name].filter(Boolean).join(' '),
+      text: tooLong ? text.slice(0, 300) + `… (слишком длинное, ${text.length} зн. — не разбирал)` : (via ? '🎤 ' : '') + text.slice(0, 2000), input: via || 'текст' });
   }
+  if (tooLong) return send(env, chat, esc((await txt(env, detectLang(text) || await getLang(env, chat))).textLong(maxLen)));
 
   // Мат не обрабатываем: отвечаем сразу, без обращения к ИИ.
   if (!cmd.startsWith('/') && SWEAR_RE.test(text.toLowerCase().replace(/ё/g, 'е'))) {
@@ -1063,6 +1155,8 @@ async function onText(env, msg, ctx) {
   const na = noAromaAsk(text);
   const canRework = !!(session && session.stage === 'done' && session.prefs);
   const rework = async (remove) => {
+    // Доработка прошлых миксов (безаромка): крепость та же, что у прошлого подбора.
+    if (session.prefs && session.prefs.strength) await logToSheet(env, ctx, { action: 'strength', userId: from.id || chat, strength: strengthLog(session.prefs.strength, 'из прошлого запроса') });
     if (session.last && await reworkNoAroma(env, chat, session, lang, remove, t0)) return;
     // Прошлые миксы восстановить не получилось (поменялось наличие) — собираем заново по тому же запросу.
     session.prefs = { ...session.prefs, noaroma: !remove };
@@ -1088,7 +1182,10 @@ async function onText(env, msg, ctx) {
   // Прошлый запрос подключаем, только если новое сообщение само похоже на продолжение («то же, но легче», «а без мяты?»).
   // Самостоятельная просьба («джин с огурцом») всегда разбирается с нуля — иначе к ней прилипают вкусы из прошлого запроса.
   const prev = session && session.stage === 'done' && session.text && looksLikeFollowup(said) ? String(session.text) : '';
-  const prefs = await extractPrefs(env, request, force ? '' : prev);
+  const prefs = await extractPrefs(env, request, force ? '' : prev, !!via);
+  // Голосовое: в журнале расшифровку заменяет короткая выжимка от ИИ, полный текст остаётся в примечании к ячейке.
+  if (via && prefs.summary) await logToSheet(env, ctx, { action: 'summary', userId: from.id || chat, summary: prefs.summary, full: said.slice(0, 2000) });
+  delete prefs.summary;
   // Безаромка: что сказали ключевые слова, а если их не было — как понял ИИ.
   const naMode = na ? (na.remove ? 'remove' : 'add') : prefs.na;
   delete prefs.na;
@@ -1157,7 +1254,7 @@ async function onText(env, msg, ctx) {
 }
 
 /** /config — коротко, что сейчас действует. */
-const CODE_VERSION = '12.58 · 69 (бесплатная картинка — снова по короткому шаблону, без текста)';
+const CODE_VERSION = '12.60 · 71 (голосовые сообщения · лимит длины текста · журнал: способ ввода и выжимка)';
 export function configSummary(cfg, env = {}, stock = null) {
   const at = cfg._at ? new Date(cfg._at).toLocaleString('ru-RU', { timeZone: 'Europe/Moscow', day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) + ' МСК' : 'ещё не загружалась — работают значения из кода';
   const s = cfg.settings;
@@ -1209,7 +1306,6 @@ async function onCallback(env, cq, ctx) {
   const session = await getSession(env, chat);
 
   if (data === 'new') await logButton('Новый запрос');
-  if (data === 'more') await logButton('Ещё варианты');
 
   if (data === 'new') {
     // Новый запрос — чистый лист: забываем прошлые вкусы, уже предложенные миксы и запомненную крепость (спросим её заново).
@@ -1232,6 +1328,11 @@ async function onCallback(env, cq, ctx) {
     const j = await send(env, chat, esc(t.orderReady(o.title)), { inline_keyboard: [[{ text: t.orderOpen, url: o.url }]] });
     if (j && j.ok === false) await send(env, chat, t.footer + (cfg.settings.shop_url ? ' ' + cfg.settings.shop_url : ''));
     return;
+  }
+  // «Ещё варианты» — те же вкусы и та же крепость, что в подборе, под которым нажали: пишем её вместе с кнопкой.
+  if (data === 'more') {
+    const st = session && session.prefs && session.stage !== 'ask_strength' && STRENGTHS.includes(session.prefs.strength) ? session.prefs.strength : '';
+    await logButton('Ещё варианты', st ? strengthLog(st, 'из прошлого запроса') : '');
   }
   if (!session) {
     if (data.startsWith('adj:')) await logButton(/^adj:\+|^adj:up/.test(data) ? 'Покрепче' : 'Полегче');
@@ -1839,15 +1940,15 @@ export function looksLikeFollowup(text) {
 }
 
 /** Шаг 1. ИИ превращает свободный текст в структуру предпочтений. */
-async function extractPrefs(env, text, prev = '') {
+async function extractPrefs(env, text, prev = '', brief = false) {
   const cfg = await loadConfig(env);
   env = applyBrains(env, cfg);
   const catalog = await loadCatalog(env);
-  const system = parsePrompt(cfg, catalog, !!prev);
+  const system = parsePrompt(cfg, catalog, !!prev, brief);
   // Разбор — простая задача: можно отдать быстрой дешёвой модели (LLM_MODEL_FAST), сборку — умной (LLM_MODEL).
   const fastEnv = { ...(env.LLM_MODEL_FAST ? { ...env, LLM_MODEL: env.LLM_MODEL_FAST, LLM_EFFORT: env.OPENAI_EFFORT_FAST || 'none' } : env), LLM_TIMEOUT_MS: LLM_TIMEOUT_FAST };
   const input = prev ? 'ПРЕДЫДУЩИЙ ЗАПРОС КЛИЕНТА (на него уже ответили):\n' + prev + '\n\nНОВОЕ СООБЩЕНИЕ КЛИЕНТА:\n' + text : text;
-  const out = await llmJson(fastEnv, system, input, 400);
+  const out = await llmJson(fastEnv, system, input, brief ? 500 : 400);
   const arr = (v) => (Array.isArray(v) ? v.filter((x) => typeof x === 'string' && x.trim()).map((x) => x.trim()).slice(0, 12) : []);
   const strength = ['light', 'medium', 'strong', 'any', 'unknown'].includes(out && out.strength) ? out.strength : 'unknown';
   return {
@@ -1855,17 +1956,21 @@ async function extractPrefs(env, text, prev = '') {
     like: arr(out && out.like), avoid: arr(out && out.avoid), groups: arr(out && out.groups),
     flavors: arr(out && out.flavors), brands: arr(out && out.brands), other_brands: arr(out && out.other_brands), strength, followup: !!(prev && out && out.followup === true),
     na: out && (out.noaroma === 'add' || out.noaroma === 'remove') ? out.noaroma : '', // просьба про безаромку, как её понял ИИ
+    ...(brief && out && typeof out.summary === 'string' && out.summary.trim() ? { summary: out.summary.trim().slice(0, 200) } : {}),
   };
 }
 
 /** Задание для шага 1: раздел «РАЗБОР ЗАПРОСА» из таблицы + формат ответа (он в коде — от него зависит, поймёт ли бот ответ). */
-export function parsePrompt(cfg, catalog = [], withPrev = false) {
+export function parsePrompt(cfg, catalog = [], withPrev = false, brief = false) {
   const brands = [...new Set(catalog.map((x) => x.b))];
   const groups = [...new Set(catalog.flatMap((x) => x.g))];
   return splitInstruction(cfg.instruction).parse.join('\n') + '\n\n' +
     'ТЕХНИЧЕСКИЕ ТРЕБОВАНИЯ:\n' +
     'Верни ТОЛЬКО JSON без пояснений:\n' +
-    '{"relevant":true,"like":[],"avoid":[],"groups":[],"flavors":[],"brands":[],"other_brands":[],"strength":"light|medium|strong|any|unknown","noaroma":"no|add|remove"' + (withPrev ? ',"followup":false' : '') + '}\n' +
+    '{"relevant":true,"like":[],"avoid":[],"groups":[],"flavors":[],"brands":[],"other_brands":[],"strength":"light|medium|strong|any|unknown","noaroma":"no|add|remove"' + (withPrev ? ',"followup":false' : '') + (brief ? ',"summary":""' : '') + '}\n' +
+    (brief ? '- Сообщение — расшифровка ГОЛОСОВОГО: в ней бывают слова-паразиты, повторы и ослышки распознавания (названия вкусов и табаков могут быть искажены — восстанови по смыслу).\n' +
+      '- summary: суть НОВОГО сообщения клиента для журнала — по-русски, 5–12 слов, без воды и без «клиент хочет»: вкусы, чего не надо, крепость ' +
+      '(пример: "свежее кисло-сладкое, манго и маракуйя, без химии, средняя крепость"). Если сообщение не по теме — о чём оно, в 3–6 словах.\n' : '') +
     '- relevant: false, если сообщение не по теме.\n' +
     '- like — вкусы, которые клиент хочет, avoid — которых не хочет: по одному слову в именительном падеже ("Малина", "Лайм", "Мята"), ВСЕГДА по-русски (с армянского переводи).\n' +
     '- groups: подходящие направления строго из списка: ' + (groups.join(', ') || 'Фруктовый, Ягодный, Цитрусовый, Освежающий, Десертный') + '.\n' +
