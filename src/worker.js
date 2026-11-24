@@ -1135,9 +1135,18 @@ async function onText(env, msg, ctx, via = '') {
   if (tooLong) return send(env, chat, esc((await txt(env, detectLang(text) || await getLang(env, chat))).textLong(maxLen)));
 
   // Мат не обрабатываем: отвечаем сразу, без обращения к ИИ.
+  // Для голосовых правило то же, но в журнал всё равно пишем выжимку (один недорогой разбор ИИ), а расшифровку — в примечание.
   if (!cmd.startsWith('/') && SWEAR_RE.test(text.toLowerCase().replace(/ё/g, 'е'))) {
     const cfgS = await loadConfig(env);
-    if (cfgS.settings.block_swear) return send(env, chat, tx(cfgS, detectLang(text) || await getLang(env, chat)).noSwear);
+    if (cfgS.settings.block_swear) {
+      if (via) {
+        const p = await extractPrefs(env, text, '', true).catch(() => null);
+        await logToSheet(env, ctx, { action: 'summary', userId: from.id || chat, summary: (p && p.summary) || '', full: text.slice(0, 2000), mark: 'Мат' });
+      } else {
+        await logToSheet(env, ctx, { action: 'summary', userId: from.id || chat, summary: '', full: '', mark: 'Мат' });
+      }
+      return send(env, chat, tx(cfgS, detectLang(text) || await getLang(env, chat)).noSwear);
+    }
   }
 
   // Пишет на другом языке — переключаемся на него.
@@ -1184,7 +1193,9 @@ async function onText(env, msg, ctx, via = '') {
   const prev = session && session.stage === 'done' && session.text && looksLikeFollowup(said) ? String(session.text) : '';
   const prefs = await extractPrefs(env, request, force ? '' : prev, !!via);
   // Голосовое: в журнале расшифровку заменяет короткая выжимка от ИИ, полный текст остаётся в примечании к ячейке.
-  if (via && prefs.summary) await logToSheet(env, ctx, { action: 'summary', userId: from.id || chat, summary: prefs.summary, full: said.slice(0, 2000) });
+  // Сообщение не по теме (текст или голосовое) — в журнале перед ним пометка «🟡 Не по теме».
+  if ((via && prefs.summary) || !prefs.relevant) await logToSheet(env, ctx, { action: 'summary', userId: from.id || chat,
+    summary: via ? prefs.summary || '' : '', full: via ? said.slice(0, 2000) : '', offtopic: !prefs.relevant });
   delete prefs.summary;
   // Безаромка: что сказали ключевые слова, а если их не было — как понял ИИ.
   const naMode = na ? (na.remove ? 'remove' : 'add') : prefs.na;
@@ -1254,7 +1265,7 @@ async function onText(env, msg, ctx, via = '') {
 }
 
 /** /config — коротко, что сейчас действует. */
-const CODE_VERSION = '12.60 · 71 (голосовые сообщения · лимит длины текста · журнал: способ ввода и выжимка)';
+const CODE_VERSION = '12.62 · 73 (мат: и в тексте, и в голосовом — «давай без мата» · журнал: пометки «мат» и «не по теме»)';
 export function configSummary(cfg, env = {}, stock = null) {
   const at = cfg._at ? new Date(cfg._at).toLocaleString('ru-RU', { timeZone: 'Europe/Moscow', day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) + ' МСК' : 'ещё не загружалась — работают значения из кода';
   const s = cfg.settings;
