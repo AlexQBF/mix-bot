@@ -506,7 +506,8 @@ async function recallStrength(env, chat) {
   return STRENGTHS.includes(s) ? s : null;
 }
 
-/** Журнал во вкладке «Журнал»: что написал клиент и какую крепость выбрал кнопкой. Пишется в фоне — клиент не ждёт. */
+/** Журнал во вкладке «Журнал»: что написал клиент, какие кнопки нажимал, какую крепость выбрал, какие миксы ему предложили и что заказал.
+ * Пишется в фоне — клиент не ждёт. */
 function logToSheet(env, ctx, payload) {
   if (!env.SHEET_SCRIPT_URL || !env.SHEET_SECRET) return;
   const job = sheetScript(env, payload).catch((e) => {
@@ -1149,7 +1150,7 @@ async function onText(env, msg, ctx) {
 }
 
 /** /config — коротко, что сейчас действует. */
-const CODE_VERSION = '12.54 · 65 (табак «назван клиентом» — только с подтверждением ИИ · три разных по вкусу микса)';
+const CODE_VERSION = '12.55 · 66 (журнал: предложенные миксы и все нажатия кнопок)';
 export function configSummary(cfg, env = {}, stock = null) {
   const at = cfg._at ? new Date(cfg._at).toLocaleString('ru-RU', { timeZone: 'Europe/Moscow', day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) + ' МСК' : 'ещё не загружалась — работают значения из кода';
   const s = cfg.settings;
@@ -1182,9 +1183,16 @@ async function onCallback(env, cq, ctx) {
   const chat = cq.message.chat.id;
   const data = cq.data || '';
   await tg(env, 'answerCallbackQuery', { callback_query_id: cq.id });
+  // Каждое нажатие кнопки — отдельной строкой в журнале («🔘 Ещё варианты»), а миксы, которые бот на него показал, — в той же строке.
+  // «Заказать» строку не добавляет: название микса пишется в колонку «Нажал «Заказать»» той строки, где этот микс предложили.
+  const from = cq.from || {};
+  const who = from.id || chat;
+  const logButton = (button, strength = '') => logToSheet(env, ctx, { action: 'button', userId: who, username: from.username || '',
+    name: [from.first_name, from.last_name].filter(Boolean).join(' '), button, strength });
 
   if (data.startsWith('lang:')) {
     const lang = data.slice(5) === 'hy' ? 'hy' : 'ru';
+    await logButton('Язык: ' + (lang === 'hy' ? 'армянский' : 'русский'));
     await setLang(env, chat, lang);
     return send(env, chat, (await txt(env, lang)).langSet);
   }
@@ -1192,6 +1200,9 @@ async function onCallback(env, cq, ctx) {
   const lang = await getLang(env, chat);
   const t = await txt(env, lang);
   const session = await getSession(env, chat);
+
+  if (data === 'new') await logButton('Новый запрос');
+  if (data === 'more') await logButton('Ещё варианты');
 
   if (data === 'new') {
     // Новый запрос — чистый лист: забываем прошлые вкусы, уже предложенные миксы и запомненную крепость (спросим её заново).
@@ -1210,12 +1221,13 @@ async function onCallback(env, cq, ctx) {
     const saved = session && Array.isArray(session.orders) ? session.orders[i] : null; // запасной путь: подбор из текущего диалога
     const o = mix ? { title: mix.title, url: orderLink(mix, t, cfg.settings.order_contact) } : saved;
     if (!o || !o.url) return send(env, chat, t.footer + (cfg.settings.shop_url ? ' ' + cfg.settings.shop_url : ''));
-    await logToSheet(env, ctx, { action: 'order', userId: (cq.from && cq.from.id) || chat, mix: o.title });
+    await logToSheet(env, ctx, { action: 'order', userId: who, mix: o.title });
     const j = await send(env, chat, esc(t.orderReady(o.title)), { inline_keyboard: [[{ text: t.orderOpen, url: o.url }]] });
     if (j && j.ok === false) await send(env, chat, t.footer + (cfg.settings.shop_url ? ' ' + cfg.settings.shop_url : ''));
     return;
   }
   if (!session) {
+    if (data.startsWith('adj:')) await logButton(/^adj:\+|^adj:up/.test(data) ? 'Покрепче' : 'Полегче');
     if (data === 'more' || data.startsWith('adj:')) await keepOrderButtons(env, cq.message);
     return send(env, chat, t.expired);
   }
@@ -1230,11 +1242,13 @@ async function onCallback(env, cq, ctx) {
   }
   if (data.startsWith('adj:')) {
     // «Покрепче» / «Полегче»: те же вкусы, другая крепость. Куда именно шагнуть, записано в самой кнопке (см. strengthSteps).
-    if (!session.prefs || session.stage === 'ask_strength') return send(env, chat, t.tellFirst);
+    const adjUp = /^adj:\+|^adj:up/.test(data);
+    const adjLog = () => logButton(adjUp ? 'Покрепче' : 'Полегче');
+    if (!session.prefs || session.stage === 'ask_strength') { await adjLog(); return send(env, chat, t.tellFirst); }
     const shown = mixesFromMessage(cq.message.text || cq.message.caption).map((m) => m.title.toLocaleUpperCase('ru'));
     const known = (session.titles || []).map((x) => String(x).toLocaleUpperCase('ru'));
     await keepOrderButtons(env, cq.message);
-    if (shown.length && !shown.some((x) => known.includes(x))) return send(env, chat, t.expired);
+    if (shown.length && !shown.some((x) => known.includes(x))) { await adjLog(); return send(env, chat, t.expired); }
     const m = data.match(/^adj:([+-])(light|medium|strong)$/);
     const cur = session.prefs.strength;
     const up = m ? m[1] === '+' : data === 'adj:up';
@@ -1245,7 +1259,7 @@ async function onCallback(env, cq, ctx) {
     // Это уточнение одного подбора, а не «как ты любишь»: запомненную крепость стираем, новый запрос начнётся со средней.
     session.tuned = true;
     await env.KV.delete('strength:' + chat).catch(() => {});
-    await logToSheet(env, ctx, { action: 'strength', userId: (cq.from && cq.from.id) || chat, strength: STRENGTH_LOG[session.prefs.strength] || session.prefs.strength });
+    await logButton(up ? 'Покрепче' : 'Полегче', STRENGTH_LOG[session.prefs.strength] || session.prefs.strength);
     return makeMixes(env, chat, session, false, lang);
   }
   if (data === 'more') {
@@ -1548,7 +1562,13 @@ async function deliver(env, chat, session, result, { cfg, t, more = false, progr
   const text = gone + result.map((m, i) => renderMix(m, i, t, { rating: cfg.settings.show_rating, ratingLink: cfg.settings.rating_link, short: cfg.settings.short_lines, keepLine: sameNameKeys(result) })).join('\n\n') + tip +
     '\n\n' + (orders.length ? t.orderHint : t.footer + (shop ? ' ' + shop : ''));
   const kb = resultKeyboard(t, orders, strengthSteps(session.prefs.strength, result));
-  const sendMixes = () => send(env, chat, text, kb);
+  // Журнал: названия показанных миксов — в строку запроса (или нажатой кнопки), на который бот ответил.
+  let logged = null;
+  const sendMixes = async () => {
+    const j = await send(env, chat, text, kb);
+    logged = logToSheet(env, null, { action: 'mixes', userId: chat, mixes: result.map((m) => m.title) });
+    return j;
+  };
   const ti = Date.now();
   if (cfg.settings.images && cfg.settings.image_first) {
     // Вместе: «загрузка» крутится, пока рисуется картинка, потом сразу картинка и следом текст с кнопками.
@@ -1571,6 +1591,7 @@ async function deliver(env, chat, session, result, { cfg, t, more = false, progr
     }
   }
   tm.image = Date.now() - ti;
+  if (logged) await logged;
   const sec = (ms) => Math.round((ms || 0) / 100) / 10;
   const total = Date.now() - t0;
   console.log(`timing parse=${sec(tm.parse)} compose=${sec(tm.compose)} image=${sec(tm.image)} text_at=${sec(tm.text)} total=${sec(total)}`);
