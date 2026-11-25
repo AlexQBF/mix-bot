@@ -139,7 +139,7 @@ const MAIN_TEXT_KEYS = ['hello', 'choose_lang', 'lang_set', 'picking', 'progress
 
 // Настройки: то, что код гарантирует сам, независимо от ИИ. Видно и меняется в таблице.
 // Адрес сайта магазина, если в таблице настройка shop_url пустая. Старый сайт на Тильде (vektorsigma.am) больше не используется.
-const SHOP_DEFAULT = 'https://alexqbf.github.io/sigma-shop/';
+const SHOP_DEFAULT = 'https://sigma-shop.khoroshilov-aleksey.workers.dev/';
 export const DEFAULT_SETTINGS = [
   { key: 'text_ai', def: 'chatgpt', type: 'choice',
     options: { chatgpt: ['chatgpt', 'gpt', 'openai', 'чатгпт', 'чат гпт', 'чат-гпт'], claude: ['claude', 'клод', 'anthropic'], 'бесплатно': ['бесплатно', 'бесплатные', 'free', 'cloudflare', 'llama'] },
@@ -159,6 +159,7 @@ export const DEFAULT_SETTINGS = [
   { key: 'logo_overlay', def: 'да', type: 'yesno', desc: 'Накладывать на картинку готовый логотип (файл src/logo.png) вместо надписи, которую рисует модель (да / нет).' },
   { key: 'block_swear', def: 'да', type: 'yesno', desc: 'Не обрабатывать сообщения с матом: бот просит написать без ругани (да / нет).' },
   { key: 'badge_overlay', def: 'да', type: 'yesno', desc: 'Добавлять на картинку значок магазина в левый верхний угол (файл src/badge.png) (да / нет). Работает вместе с logo_overlay.' },
+  { key: 'show_timing', def: 'да', type: 'yesno', desc: 'Админам после каждого их подбора — строка «⏱ сколько секунд занял каждый шаг». Клиенты её не видят (да / нет).' },
   { key: 'voice', def: 'да', type: 'yesno', desc: 'Принимать голосовые сообщения: бот расшифровывает их (бесплатный Whisper на Cloudflare) и подбирает миксы, как по тексту (да / нет).' },
   { key: 'voice_max_sec', def: '60', type: 'int', min: 10, max: 180,
     desc: 'Самое длинное голосовое, которое бот расшифровывает, секунд. Длиннее — просит записать покороче, ИИ не тратится.' },
@@ -1020,6 +1021,7 @@ async function onVoice(env, msg, ctx) {
     return send(env, chat, esc(t.voiceLong(st.voice_max_sec)));
   }
   await action(env, chat, 'typing');
+  const tv = Date.now();
   let text = '';
   try {
     text = await transcribe(env, msg.voice.file_id, lang);
@@ -1032,10 +1034,10 @@ async function onVoice(env, msg, ctx) {
   if (!text) { await log('🎤 (без слов)'); return send(env, chat, t.voiceFail); }
   // Косая черта в начале расшифровки не должна превратиться в команду бота.
   text = text.replace(/^[\/\s]+/, '').slice(0, st.text_max_chars);
-  return onText(env, { ...msg, text }, ctx, via);
+  return onText(env, { ...msg, text }, ctx, via, Date.now() - tv);
 }
 
-async function onText(env, msg, ctx, via = '') {
+async function onText(env, msg, ctx, via = '', voiceMs = 0) {
   const chat = msg.chat.id;
   const text = msg.text.trim();
   const cmd = text.split(/[\s@]/)[0].toLowerCase();
@@ -1268,11 +1270,11 @@ async function onText(env, msg, ctx, via = '') {
   }
   if (prefs.strength === 'unknown') { prefs.strength = 'any'; src = 'не сказал'; }
   await logToSheet(env, ctx, { action: 'strength', userId: from.id || chat, strength: strengthLog(prefs.strength, src) });
-  await makeMixes(env, chat, { text: request, prefs, ...carry, ...(tuned ? { tuned: true } : {}) }, false, lang, note, t0);
+  await makeMixes(env, chat, { text: request, prefs, ...carry, ...(tuned ? { tuned: true } : {}) }, false, lang, note, t0, voiceMs);
 }
 
 /** /config — коротко, что сейчас действует. */
-const CODE_VERSION = '12.67 · 78 (только новый сайт: shop_url, ссылки на табаки и кнопки «🛒 в корзину»)';
+const CODE_VERSION = '12.70 · 81 (админам после подбора — сколько секунд занял каждый шаг, включая отправку)';
 export function configSummary(cfg, env = {}, stock = null) {
   const at = cfg._at ? new Date(cfg._at).toLocaleString('ru-RU', { timeZone: 'Europe/Moscow', day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) + ' МСК' : 'ещё не загружалась — работают значения из кода';
   const s = cfg.settings;
@@ -1626,8 +1628,8 @@ export async function checkStuck(env) {
   return stuck;
 }
 
-async function makeMixes(env, chat, session, more = false, lang = 'ru', note = '', t0 = Date.now()) {
-  const tm = { start: Date.now(), parse: Date.now() - t0 };
+async function makeMixes(env, chat, session, more = false, lang = 'ru', note = '', t0 = Date.now(), voiceMs = 0) {
+  const tm = { start: Date.now(), parse: Date.now() - t0, voice: voiceMs };
   const cfg = await loadConfig(env);
   env = applyBrains(env, cfg);
   const t = tx(cfg, lang);
@@ -1665,6 +1667,7 @@ async function makeMixes(env, chat, session, more = false, lang = 'ru', note = '
   if (candidates.length < 4) { await progress.stop(false); await busyClear(env, chat); return send(env, chat, t.tooFew, resultKeyboard(t)); }
 
   const tc = Date.now();
+  tm.pick = tc - tm.start;
   await busyBeat(bz, 'сборка миксов (ИИ)');
   let result = await composeMixes(env, session, candidates, lang, cfg);
   if (!result.length) { await busyBeat(bz, 'сборка миксов (ИИ), вторая попытка'); result = await composeMixes(env, session, candidates, lang, cfg); } // одна повторная попытка
@@ -1734,27 +1737,46 @@ async function deliver(env, chat, session, result, { cfg, t, more = false, progr
     // Вместе: «загрузка» крутится, пока рисуется картинка, потом сразу картинка и следом текст с кнопками.
     // Двумя сообщениями, а не подписью к картинке: подпись узкая (по ширине картинки) — состав читать неудобно. Текст без картинки вперёд не уходит.
     const photo = await coverImage(env, result, cfg, (stage) => busyBeat(bz, stage));
+    tm.image = Date.now() - ti; // только рисование (с наложением логотипа); отправка в Telegram считается отдельно
+    const ts = Date.now();
     await progress.stop();
     if (photo) await sendPhoto(env, chat, photo, '');
     await sendMixes();
+    tm.send = Date.now() - ts;
     await busyClear(env, chat);
     tm.text = Date.now() - t0;
   } else {
+    const ts = Date.now();
     await progress.stop();
     await sendMixes();
+    tm.send = Date.now() - ts;
     await busyClear(env, chat); // миксы у клиента — дальше только картинка, ждать её страховке незачем
     tm.text = Date.now() - t0;
     if (cfg.settings.images) {
       await action(env, chat, 'upload_photo');
+      const ti2 = Date.now();
       const photo = await coverImage(env, result, cfg);
+      tm.image = Date.now() - ti2;
       if (photo) await sendPhoto(env, chat, photo, '');
     }
   }
-  tm.image = Date.now() - ti;
+  if (tm.image == null) tm.image = 0;
   if (logged) await logged;
   const sec = (ms) => Math.round((ms || 0) / 100) / 10;
   const total = Date.now() - t0;
   console.log(`timing parse=${sec(tm.parse)} compose=${sec(tm.compose)} image=${sec(tm.image)} text_at=${sec(tm.text)} total=${sec(total)}`);
+  // Админу после его собственного подбора — честная раскладка по шагам. Клиенты этого не видят.
+  if (cfg.settings.show_timing && (await adminIds(env)).includes(String(chat))) {
+    const wait = (tm.voice || 0) + (tm.text || 0);
+    await send(env, chat, esc('⏱ ' + [
+      tm.voice ? `расшифровка голосового ${sec(tm.voice)} с` : '',
+      `разбор запроса ${sec(tm.parse)} с`,
+      tm.pick != null ? `отбор табаков ${sec(tm.pick)} с` : '',
+      `сборка миксов (ИИ) ${sec(tm.compose)} с`,
+      cfg.settings.images ? `картинка ${sec(tm.image)} с` : '',
+      `отправка в Telegram ${sec(tm.send)} с`,
+    ].filter(Boolean).join(' · ') + `\nОт сообщения до миксов: ${sec(wait)} с.`)).catch(() => {});
+  }
   // Клиент ждал миксы дольше 75 секунд — сообщаем админам, на каком шаге (не чаще раза в 10 минут).
   if (tm.text > 75000) {
     await reportProblem(env, 'slow', `🐢 Клиент ждал миксы ${sec(tm.text)} с: разбор запроса ${sec(tm.parse)} с, сборка миксов ${sec(tm.compose)} с, ` +
