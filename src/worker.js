@@ -48,8 +48,8 @@ export const DEFAULT_TEXTS = {
   btn_strong: ['🔥 Крепко', '🔥 Թունդ', 'Кнопка крепости'],
   btn_any: ['Без разницы', 'Միևնույն է', 'Кнопка крепости'],
   picking: ['🔎 Подбираю миксы…', '🔎 Միքսեր եմ ընտրում…', 'Пока бот думает — первая фраза'],
-  progress: ['📦 Шуршим пакетиками с табаком… | 👃 Принюхиваемся к вкусам… | 🗄 Перебираем полки с банками… | ⚖️ Отмеряем граммы… | 🧪 Пробуем сочетания… | 🍋 Добавляем кислинку… | 🍯 Проверяем, не слишком ли сладко… | 🧊 Кидаем лёд в колбу… | 🔥 Раздуваем угли… | 🫧 Продуваем шахту… | 🤔 Спорим с кальянщиком о пропорциях… | ✍️ Придумываем названия… | 💋 Подбираем слова повкуснее… | 🎨 Смешиваем краски для картинки… | 🖌 Рисуем твои миксы… | 📸 Выставляем свет… | ✨ Наводим глянец… | 🧐 Проверяем, что всё сходится… | 🎁 Упаковываем красиво… | 💨 Почти готово, выдыхаем…',
-    '📦 Խշխշացնում ենք ծխախոտի տուփերը… | 👃 Հոտոտում ենք համերը… | 🗄 Նայում ենք դարակները… | ⚖️ Չափում ենք գրամները… | 🧪 Փորձում ենք համադրությունները… | 🍋 Ավելացնում ենք թթվաշություն… | 🍯 Ստուգում ենք՝ շատ քաղցր չէ՞… | 🧊 Սառույց ենք գցում կոլբայի մեջ… | 🔥 Վառում ենք ածուխները… | 🫧 Փչում ենք նարգիլեն… | 🤔 Վիճում ենք վարպետի հետ համամասնությունների մասին… | ✍️ Անուններ ենք հորինում… | 💋 Համեղ բառեր ենք ընտրում… | 🎨 Խառնում ենք ներկերը նկարի համար… | 🖌 Նկարում ենք քո միքսերը… | 📸 Լույսն ենք ուղղում… | ✨ Փայլ ենք տալիս… | 🧐 Ստուգում ենք, որ ամեն ինչ համընկնի… | 🎁 Գեղեցիկ փաթեթավորում ենք… | 💨 Գրեթե պատրաստ է…',
+  progress: ['📦 Шуршим пакетиками с табаком… | 👃 Принюхиваемся к вкусам… | 🧠 Думаем внимательно… | 🧪 Пробуем сочетания… | ⚖️ Отмеряем граммы… | 🤔 Спорим с кальянщиком о пропорциях… | ✍️ Придумываем названия… | 🎨 Смешиваем краски для картинки… | 🖌 Рисуем твои миксы… | 📸 Выставляем свет… | 🔥 Раздуваем угли… | ✨ Наводим глянец… | 🧐 Проверяем, что всё сходится… | 🎁 Упаковываем красиво… | ⏳ Ещё чуть-чуть, оно того стоит… | 💨 Почти готово, выдыхаем…',
+    '📦 Խշխշացնում ենք ծխախոտի տուփերը… | 👃 Հոտոտում ենք համերը… | 🧠 Ուշադիր մտածում ենք… | 🧪 Փորձում ենք համադրությունները… | ⚖️ Չափում ենք գրամները… | 🤔 Վիճում ենք վարպետի հետ համամասնությունների մասին… | ✍️ Անուններ ենք հորինում… | 🎨 Խառնում ենք ներկերը նկարի համար… | 🖌 Նկարում ենք քո միքսերը… | 📸 Լույսն ենք ուղղում… | 🔥 Վառում ենք ածուխները… | ✨ Փայլ ենք տալիս… | 🧐 Ստուգում ենք, որ ամեն ինչ համընկնի… | 🎁 Գեղեցիկ փաթեթավորում ենք… | ⏳ Մի քիչ էլ, արժե սպասել… | 💨 Գրեթե պատրաստ է…',
     'Фразы, которые сменяют друг друга, пока бот думает. Разделяются знаком |'],
   strength_remembered: ['{s} — как ты любишь. Хочешь поменять — скажи.', '{s}՝ ինչպես սիրում ես։ Ուզում ես փոխել՝ ասա։',
     'Под «Подбираю миксы…», если бот взял крепость из прошлого запроса'],
@@ -144,6 +144,11 @@ export const DEFAULT_SETTINGS = [
   { key: 'text_ai', def: 'chatgpt', type: 'choice',
     options: { chatgpt: ['chatgpt', 'gpt', 'openai', 'чатгпт', 'чат гпт', 'чат-гпт'], claude: ['claude', 'клод', 'anthropic'], 'бесплатно': ['бесплатно', 'бесплатные', 'free', 'cloudflare', 'llama'] },
     desc: 'Кто собирает миксы и пишет тексты: «chatgpt», «claude» или «бесплатно» (Llama на Cloudflare). Модели — в wrangler.toml.' },
+  { key: 'text_model', def: '', type: 'text', desc: 'Модель ChatGPT для сборки миксов, например gpt-6.1-terra (умнее) или gpt-6-luna (быстрее и дешевле). Пусто — модель из wrangler.toml.' },
+  { key: 'ai_effort', def: 'low', type: 'choice', options: { none: ['none', 'нет', 'без'], low: ['low', 'мало'], medium: ['medium', 'средне'], high: ['high', 'много'] },
+    desc: 'Сколько ИИ «думает» перед сборкой миксов: none — быстрее всего, low — немного (как было), medium, high — дольше и вдумчивее.' },
+  { key: 'image_quality', def: 'medium', type: 'choice', options: { low: ['low', 'низкое'], medium: ['medium', 'среднее'], high: ['high', 'высокое'] },
+    desc: 'Качество картинки ChatGPT: low — быстрее и дешевле, medium — как было, high — детальнее и дольше.' },
   { key: 'image_ai', def: 'chatgpt', type: 'choice',
     options: { chatgpt: ['chatgpt', 'gpt', 'openai', 'чатгпт', 'чат гпт', 'чат-гпт'], 'бесплатно': ['бесплатно', 'бесплатные', 'free', 'cloudflare', 'flux'] },
     desc: 'Кто рисует картинку: «chatgpt» или «бесплатно» (FLUX на Cloudflare). Claude картинки не рисует.' },
@@ -672,13 +677,16 @@ export function applyBrains(env, cfg) {
     Object.assign(e, { LLM_PROVIDER: 'anthropic', LLM_MODEL: env.CLAUDE_MODEL || 'claude-sonnet-5-5', LLM_MODEL_FAST: env.CLAUDE_MODEL_FAST || 'claude-haiku-5-5',
       LLM_API_KEY: env.ANTHROPIC_API_KEY || env.LLM_API_KEY, LLM_BASE_URL: '' });
   } else if (text === 'chatgpt') {
-    Object.assign(e, { LLM_PROVIDER: 'openai', LLM_MODEL: env.OPENAI_MODEL || 'gpt-6.1-terra', LLM_MODEL_FAST: env.OPENAI_MODEL_FAST || 'gpt-6-luna',
+    Object.assign(e, { LLM_PROVIDER: 'openai', LLM_MODEL: (/^[a-z0-9][a-z0-9.\-]{2,60}$/i.test(String(s.text_model || '').trim()) ? String(s.text_model).trim() : '') || env.OPENAI_MODEL || 'gpt-6.1-terra', LLM_MODEL_FAST: env.OPENAI_MODEL_FAST || 'gpt-6-luna',
       LLM_API_KEY: openaiKey, LLM_BASE_URL: '' });
   } else {
     Object.assign(e, { LLM_PROVIDER: 'cloudflare', LLM_MODEL: FREE_LLM, LLM_MODEL_FAST: '' });
   }
   if (image === 'chatgpt') Object.assign(e, { IMAGE_PROVIDER: 'openai', IMAGE_MODEL: env.OPENAI_IMAGE_MODEL || 'gpt-image-2.5-flare', IMAGE_API_KEY: openaiKey });
   else Object.assign(e, { IMAGE_PROVIDER: 'cloudflare', IMAGE_MODEL: FREE_IMAGE });
+  // Скорость против качества — из таблицы, чтобы пробовать без выкладки (сравнивать по строке ⏱ после подбора).
+  if (s.ai_effort) e.LLM_EFFORT = s.ai_effort;
+  if (s.image_quality) e.IMAGE_QUALITY = s.image_quality;
   return e;
 }
 
@@ -1274,7 +1282,7 @@ async function onText(env, msg, ctx, via = '', voiceMs = 0) {
 }
 
 /** /config — коротко, что сейчас действует. */
-const CODE_VERSION = '12.70 · 81 (админам после подбора — сколько секунд занял каждый шаг, включая отправку)';
+const CODE_VERSION = '12.71 · 82 (анимация быстрее и по шагам · скорость: image_quality, ai_effort, text_model в таблице)';
 export function configSummary(cfg, env = {}, stock = null) {
   const at = cfg._at ? new Date(cfg._at).toLocaleString('ru-RU', { timeZone: 'Europe/Moscow', day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) + ' МСК' : 'ещё не загружалась — работают значения из кода';
   const s = cfg.settings;
@@ -1288,6 +1296,7 @@ export function configSummary(cfg, env = {}, stock = null) {
     `Журнал и чтение таблицы через скрипт Google: ${env.SHEET_SCRIPT_URL ? (env.SHEET_SECRET ? 'подключено' : 'адрес есть, но нет секрета SHEET_SECRET') : 'не подключено (SHEET_SCRIPT_URL пустой)'}\n` +
     `В таблице: тексты — <b>${esc(s.text_ai)}</b>, картинки — <b>${esc(s.image_ai)}</b>\n` +
     `Тексты: ${esc(e.LLM_PROVIDER || 'cloudflare')} · ${esc(e.LLM_MODEL || 'llama-3.3-70b')}` +
+    (e.LLM_PROVIDER === 'openai' ? ` · обдумывание ${esc(e.LLM_EFFORT || 'low')}` : '') +
     (e.LLM_MODEL_FAST ? ` (разбор запроса — ${esc(e.LLM_MODEL_FAST)})` : '') + '\n' +
     `Картинки: ${esc(e.IMAGE_PROVIDER || 'cloudflare')} · ${esc(e.IMAGE_MODEL || 'flux-2-klein-4b')}` +
     (e.IMAGE_PROVIDER === 'openai' ? ` · качество ${esc(e.IMAGE_QUALITY || 'medium')}` : '') + '\n\n' +
@@ -1540,7 +1549,8 @@ export function orderButtons(mixes, t, contact) {
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 /** Сообщение-«загрузка»: каждые ~2,5 с меняет фразу, пока бот работает. stop() убирает его. */
-const PROGRESS_EDITS = 14;       // смен фразы за один ответ (≈ 40 секунд), дальше остаётся последняя
+const PROGRESS_EDITS = 16;       // смен фразы за один ответ (≈ 40 секунд), дальше остаётся последняя
+const PROGRESS_STEP = 2500;      // пауза между фразами, мс. Первые 6–7 фраз — про подбор (≈ 15 с), дальше — про картинку
 // Потолки ожидания — только страховка от вечного зависания. Медленный ответ платного ИИ — не повод переходить на бесплатный:
 // ждём столько, сколько нужно. Бесплатная модель подключается, только когда платная недоступна (ошибка, кончился баланс).
 const LLM_TIMEOUT = 90000;       // сборка миксов
@@ -1572,7 +1582,7 @@ async function startProgress(env, chat, first, phrases, note = '') {
       // Каждая смена фразы — внешний запрос, а их у бесплатного Cloudflare 50 на одно сообщение клиента.
       // Раньше при долгом ответе фразы съедали весь лимит, и на сам ответ запросов не оставалось.
       for (let i = 0; !done && i < PROGRESS_EDITS; i++) {
-        await sleep(3000);
+        await sleep(PROGRESS_STEP);
         if (done) break;
         await tg(env, 'editMessageText', { chat_id: chat, message_id: id, text: esc(phrases[i % phrases.length]) + tail, parse_mode: 'HTML' }).catch(() => {});
       }
